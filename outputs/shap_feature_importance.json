@@ -1,0 +1,206 @@
+{
+  "model_S": [
+    {
+      "feature": "billing_amount",
+      "mean_abs_shap": 614628.0625
+    },
+    {
+      "feature": "revolving_principal_before_payment",
+      "mean_abs_shap": 49088.32421875
+    },
+    {
+      "feature": "card_limit",
+      "mean_abs_shap": 13522.7197265625
+    },
+    {
+      "feature": "limit_utilization_ratio",
+      "mean_abs_shap": 10275.1826171875
+    },
+    {
+      "feature": "carryover_share_slope_3m",
+      "mean_abs_shap": 8774.70703125
+    },
+    {
+      "feature": "total_payment_amount",
+      "mean_abs_shap": 8591.541015625
+    },
+    {
+      "feature": "ending_carryover_principal",
+      "mean_abs_shap": 8460.275390625
+    },
+    {
+      "feature": "committed_payment_ratio",
+      "mean_abs_shap": 7098.49169921875
+    },
+    {
+      "feature": "payment_ratio_gap",
+      "mean_abs_shap": 6894.3837890625
+    },
+    {
+      "feature": "minimum_principal_required",
+      "mean_abs_shap": 5179.68701171875
+    },
+    {
+      "feature": "revolving_fee",
+      "mean_abs_shap": 5065.6826171875
+    },
+    {
+      "feature": "scheduled_principal_payment",
+      "mean_abs_shap": 4739.78271484375
+    },
+    {
+      "feature": "carryover_share_delta_3m",
+      "mean_abs_shap": 4184.201171875
+    },
+    {
+      "feature": "committed_ratio_delta_3m",
+      "mean_abs_shap": 4152.38525390625
+    },
+    {
+      "feature": "carryover_share",
+      "mean_abs_shap": 3048.1533203125
+    },
+    {
+      "feature": "delinquency_count_6m",
+      "mean_abs_shap": 2597.010498046875
+    },
+    {
+      "feature": "actual_principal_paid",
+      "mean_abs_shap": 2588.999267578125
+    },
+    {
+      "feature": "revolving_streak_months",
+      "mean_abs_shap": 1644.4447021484375
+    },
+    {
+      "feature": "minimum_payment_ratio",
+      "mean_abs_shap": 1595.93505859375
+    },
+    {
+      "feature": "minimum_payment_streak",
+      "mean_abs_shap": 863.2711791992188
+    },
+    {
+      "feature": "month_index",
+      "mean_abs_shap": 803.9838256835938
+    },
+    {
+      "feature": "payment_status_최소결제",
+      "mean_abs_shap": 458.984375
+    },
+    {
+      "feature": "payment_status_정상",
+      "mean_abs_shap": 47.901954650878906
+    },
+    {
+      "feature": "payment_status_연체",
+      "mean_abs_shap": 3.9558792114257812
+    },
+    {
+      "feature": "revolving_active",
+      "mean_abs_shap": 0.0
+    }
+  ],
+  "model_r": [
+    {
+      "feature": "committed_payment_ratio",
+      "mean_abs_shap": 0.24349719285964966
+    },
+    {
+      "feature": "payment_ratio_gap",
+      "mean_abs_shap": 0.05218355357646942
+    },
+    {
+      "feature": "carryover_share",
+      "mean_abs_shap": 0.026637163013219833
+    },
+    {
+      "feature": "minimum_payment_streak",
+      "mean_abs_shap": 0.010600456036627293
+    },
+    {
+      "feature": "minimum_payment_ratio",
+      "mean_abs_shap": 0.00940210185945034
+    },
+    {
+      "feature": "committed_ratio_delta_3m",
+      "mean_abs_shap": 0.0034383086021989584
+    },
+    {
+      "feature": "limit_utilization_ratio",
+      "mean_abs_shap": 0.001665067975409329
+    },
+    {
+      "feature": "month_index",
+      "mean_abs_shap": 0.0015935965348035097
+    },
+    {
+      "feature": "revolving_fee",
+      "mean_abs_shap": 0.0010781242744997144
+    },
+    {
+      "feature": "billing_amount",
+      "mean_abs_shap": 0.0010087017435580492
+    },
+    {
+      "feature": "carryover_share_slope_3m",
+      "mean_abs_shap": 0.0007057822658680379
+    },
+    {
+      "feature": "ending_carryover_principal",
+      "mean_abs_shap": 0.0006766639417037368
+    },
+    {
+      "feature": "total_payment_amount",
+      "mean_abs_shap": 0.0005934066139161587
+    },
+    {
+      "feature": "minimum_principal_required",
+      "mean_abs_shap": 0.0005380555521696806
+    },
+    {
+      "feature": "revolving_principal_before_payment",
+      "mean_abs_shap": 0.0004466114332899451
+    },
+    {
+      "feature": "carryover_share_delta_3m",
+      "mean_abs_shap": 0.0004388093657325953
+    },
+    {
+      "feature": "actual_principal_paid",
+      "mean_abs_shap": 0.0003675562620628625
+    },
+    {
+      "feature": "scheduled_principal_payment",
+      "mean_abs_shap": 0.0003483125183265656
+    },
+    {
+      "feature": "revolving_streak_months",
+      "mean_abs_shap": 0.00015763810370117426
+    },
+    {
+      "feature": "card_limit",
+      "mean_abs_shap": 0.0001103254035115242
+    },
+    {
+      "feature": "payment_status_최소결제",
+      "mean_abs_shap": 8.41026267153211e-05
+    },
+    {
+      "feature": "payment_status_정상",
+      "mean_abs_shap": 2.7558580768527463e-05
+    },
+    {
+      "feature": "delinquency_count_6m",
+      "mean_abs_shap": 1.788221561582759e-05
+    },
+    {
+      "feature": "payment_status_연체",
+      "mean_abs_shap": 4.006780329746107e-07
+    },
+    {
+      "feature": "revolving_active",
+      "mean_abs_shap": 0.0
+    }
+  ]
+}

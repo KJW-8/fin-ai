@@ -1,0 +1,16 @@
+# 로컬 개발 환경 (배포에는 불필요)
+.micromamba/
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+
+# Streamlit secrets — API 키가 들어갈 수 있으므로 절대 커밋 금지
+# (배포 시에는 Streamlit Cloud 대시보드의 Secrets에 직접 입력한다)
+.streamlit/secrets.toml
+
+# 참고: data/*.csv, models/*.json, outputs/*.json 은 배포된 앱이 구동에 필요로 하므로
+#      의도적으로 커밋 대상에 포함한다 (이전에 여기서 제외했던 항목).

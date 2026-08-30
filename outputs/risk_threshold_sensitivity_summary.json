@@ -1,0 +1,24 @@
+{
+  "summary": {
+    "thresholds": [
+      0.35,
+      0.4,
+      0.45
+    ],
+    "n_accounts": 800,
+    "n_accounts_reached_warn_by_threshold": {
+      "first_warn_month_th35": 564,
+      "first_warn_month_th40": 564,
+      "first_warn_month_th45": 559
+    },
+    "n_accounts_reached_all_thresholds": 559,
+    "same_first_warn_month_rate_35_vs_45": 0.631484794275492,
+    "avg_month_shift_35_to_45": 0.7674418604651163
+  },
+  "medium_persona_example": {
+    "account_id": "8f44cfcb-1791-4f30-bfb7-cc93859a7382",
+    "first_warn_month_th35": 4.0,
+    "first_warn_month_th40": 5.0,
+    "first_warn_month_th45": 6.0
+  }
+}
