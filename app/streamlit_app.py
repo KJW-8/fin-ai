@@ -45,8 +45,14 @@ from shap_utils import build_explainers, explain_row, load_models  # noqa: E402
 
 import charts  # noqa: E402
 import theme  # noqa: E402
+import mascot  # noqa: E402
 from coaching import _hydrate_env_from_st_secrets  # noqa: E402
 from forecast_utils import find_first_escalation, find_minimum_intervention, multi_month_outlook, simulate_intervention_trajectory  # noqa: E402
+
+# 이산시간 위험모형(보완 모델) — XGBoost 파이프라인과 별도. "언제 위험 단계로 넘어갈
+# 가능성이 있는가"만 담당한다. 계산은 전부 src/hazard.py 가 하고 이 파일은 표시만 한다.
+import hazard as hz  # noqa: E402
+import recovery as rec  # noqa: E402
 
 # Streamlit Cloud에서 Secrets로 넣은 ANTHROPIC_API_KEY / USE_MOCK_COACHING 값을
 # os.environ에 미리 반영해 둔다 (이 파일의 os.environ 조회와 coaching.py가 일관되게
@@ -106,6 +112,25 @@ def load_models_and_explainers():
     model_S, model_r, feature_cols = load_models()
     explainer_S, explainer_r = build_explainers(model_S, model_r)
     return model_S, model_r, feature_cols, explainer_S, explainer_r
+
+
+@st.cache_resource
+def load_hazard():
+    """이산시간 위험모형 번들. 없으면 None (앱은 hazard 기능만 빼고 정상 동작)."""
+    try:
+        b = hz.load_bundle()
+        return b["model"], b["feats"]
+    except Exception:
+        return None, None
+
+
+@st.cache_data
+def load_hazard_metrics():
+    p = OUTPUTS_DIR / "hazard_metrics.json"
+    if not p.exists():
+        return None
+    with open(p, encoding="utf-8") as f:
+        return json.load(f)
 
 
 @st.cache_data
@@ -265,6 +290,51 @@ def build_prediction_bundle(anchor_row: pd.DataFrame, monthly_transaction, deriv
 
 
 # ---------------------------------------------------------------------------
+# Hazard Model + 회복 게이지 — 계산은 전부 src/hazard.py, src/recovery.py 가 담당.
+# 이 파일은 anchor_row 에서 필요한 피처만 추려 넘기고 결과를 표시할 뿐이다.
+# ---------------------------------------------------------------------------
+def _hazard_state_from_row(row, risk_level: str) -> dict:
+    st_dict = {}
+    for c in hz.HAZARD_FEATURES:
+        v = row.get(c) if hasattr(row, "get") else (row[c] if c in row else None)
+        st_dict[c] = None if (v is None or (isinstance(v, float) and pd.isna(v))) else float(v)
+    st_dict["current_risk"] = risk_level
+    return st_dict
+
+
+@st.cache_data(show_spinner=False)
+def _cached_hazard_bundle(state_items: tuple, current_month: int):
+    model, feats = load_hazard()
+    if model is None:
+        return None
+    return hz.build_hazard_bundle(dict(state_items), int(current_month), model=model, feats=feats)
+
+
+def compute_hazard_bundle(row, risk_level: str, current_month: int) -> dict | None:
+    state = _hazard_state_from_row(row, risk_level)
+    # dict 는 캐시 키가 안 되므로 정렬된 튜플로
+    key = tuple(sorted((k, (round(v, 6) if isinstance(v, float) else v)) for k, v in state.items()))
+    return _cached_hazard_bundle(key, current_month)
+
+
+def _simulated_hazard_bundle(anchor_row, bundle, sim_calc, new_risk, new_delta_3m, new_streak):
+    """What-if 시뮬레이션 상태에 대한 hazard 재계산. 시뮬레이터가 바꾸는 값(의존도/결제여유/
+    연속최소결제/3개월변화)만 갱신하고 나머지 피처는 anchor 유지. 계산은 src/hazard.py."""
+    model, feats = load_hazard()
+    if model is None:
+        return None
+    arow = anchor_row.iloc[0]
+    state = _hazard_state_from_row(arow, new_risk)
+    state["carryover_share"] = float(sim_calc["carryover_share"])
+    state["payment_ratio_gap"] = float(sim_calc["payment_ratio_gap"])
+    state["minimum_payment_streak"] = float(new_streak)
+    if pd.notna(new_delta_3m):
+        state["carryover_share_delta_3m"] = float(new_delta_3m)
+    state["current_risk"] = new_risk
+    return hz.build_hazard_bundle(state, int(bundle["month_index"]), model=model, feats=feats)
+
+
+# ---------------------------------------------------------------------------
 # 화면 텍스트 유틸 (표현만 담당, 계산 없음)
 # ---------------------------------------------------------------------------
 def fmt_pct(x: float, signed: bool = False) -> str:
@@ -300,15 +370,86 @@ def risk_level_action_text(level: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Hazard Model 표시 블록 — "언제 위험 단계로 넘어갈 가능성이 있는가"
+# XGBoost(다음 달 값이 어떻게 움직일까)와 역할이 다르다는 점을 명시한다.
+# ---------------------------------------------------------------------------
+def render_hazard_block(bundle: dict, context: str = "home") -> None:
+    hzb = bundle.get("hazard")
+    mascot.section_with_accent(
+        "언제 위험 단계로 넘어갈 가능성이 있나요?",
+        "XGBoost 전망이 '값이 어떻게 움직일까'라면, 이 이산시간 위험모형은 '언제 경고 단계로 넘어갈 "
+        "가능성이 있을까'를 별도로 계산합니다.",
+        accent_key="report",
+    )
+    if hzb is None:
+        st.info("위험 전환 모형이 아직 학습되지 않았습니다 (models/hazard_model.joblib 없음).")
+        return
+    if not hzb.get("applicable"):
+        st.markdown(
+            theme.alert_card(
+                "ℹ️", "이미 경고/심화 단계예요",
+                "위험 전환 모형은 아직 경고 단계로 넘어가지 않은 분의 '전환 시점'을 예측하는 모형이에요. "
+                "지금은 아래 회복 미션과 상환 시뮬레이션에서 개선 방향을 확인하시는 게 더 도움이 됩니다.",
+                tone="주의",
+            ),
+            unsafe_allow_html=True,
+        )
+        return
+
+    tp3 = hzb.get("transition_probability_3m")
+    mtw = hzb.get("median_time_to_warning")
+    tiles = [
+        theme.metric_tile("향후 3개월 경고 전환 가능성", fmt_pct(tp3) if tp3 is not None else "—",
+                          note="현재 패턴 유지 가정 · 확정값 아님"),
+        theme.metric_tile(
+            "예상 전환 시점",
+            (f"약 {mtw}개월 후" if mtw else "관측기간 내 낮음"),
+            note="생존확률이 50% 아래로 내려가는 시점",
+        ),
+    ]
+    st.markdown(theme.card_open() + theme.metric_row(tiles) + theme.card_close(), unsafe_allow_html=True)
+
+    traj = hzb.get("trajectory") or []
+    if traj:
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=[t["month_offset"] for t in traj],
+            y=[t["survival"] * 100 for t in traj],
+            mode="lines+markers", name="유지 확률",
+            line=dict(color=theme.BRAND, width=3),
+        ))
+        fig.add_hline(y=50, line_dash="dot", line_color=theme.SUBTLE,
+                      annotation_text="50% (예상 전환 시점 기준선)", annotation_position="bottom right")
+        fig.update_layout(height=240, margin=dict(l=10, r=10, t=10, b=10),
+                          xaxis_title="개월 후", yaxis_title="경고 단계로 안 넘어갈 확률(%)",
+                          yaxis=dict(range=[0, 100]))
+        with st.container(border=True):
+            st.markdown(
+                f'<div style="color:{theme.SUBTLE};font-size:0.85rem;margin-bottom:0.3rem;">'
+                "선이 아래로 내려갈수록, 지금 패턴이 유지될 때 그 시점까지 경고 단계로 넘어가지 않을 확률이 낮아진다는 뜻이에요.</div>",
+                unsafe_allow_html=True,
+            )
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+    st.caption("이 수치는 별도의 이산시간 위험모형(로지스틱 회귀)이 계산한 추정치이며, 확정된 결과가 아닙니다. "
+               "모형 검증 지표는 '모델 신뢰도' 화면에서 확인할 수 있어요.")
+
+
+# ---------------------------------------------------------------------------
 # 사이드바: 네비게이션 + Demo Mode
 # ---------------------------------------------------------------------------
 def render_sidebar(account_master: pd.DataFrame, feature_table: pd.DataFrame, derived_features: pd.DataFrame):
     with st.sidebar:
+        # 제목 + 문구(왼쪽) / 마스코트(오른쪽) 나란히
+        _g = mascot.accent("greeting", size_px=96)
         st.markdown(
-            f'<div style="font-size:2.1rem;font-weight:900;color:{theme.SIDEBAR_TEXT};padding:0.4rem 0 0.2rem 0;">'
-            f'{theme.yoga_icon_svg("#ffffff", size=30)} 오뚝이</div>'
-            f'<div style="font-size:0.88rem;color:{theme.SIDEBAR_TEXT_MUTED};font-weight:500;line-height:1.5;padding-bottom:1.1rem;">'
-            f'당신의 리밸런싱도,<br>쓰러져도 스스로 중심을 되찾는 오뚝이처럼</div>',
+            theme.compact_html(
+                f'<div style="display:flex;align-items:center;gap:0.6rem;margin:0.3rem 0 1rem 0;">'
+                f'<div style="flex:1;min-width:0;">'
+                f'<div style="font-size:2rem;font-weight:900;color:{theme.SIDEBAR_TEXT};line-height:1.1;">오뚝이</div>'
+                f'<div style="font-size:0.82rem;color:{theme.SIDEBAR_TEXT_MUTED};font-weight:500;line-height:1.45;margin-top:4px;">'
+                f'당신의 리밸런싱도,<br>쓰러져도 스스로 중심을 되찾는 오뚝이처럼</div></div>'
+                f'<div style="flex-shrink:0;">{_g}</div></div>'
+            ),
             unsafe_allow_html=True,
         )
 
@@ -415,6 +556,20 @@ def render_sidebar(account_master: pd.DataFrame, feature_table: pd.DataFrame, de
 def render_home(bundle: dict, outlook: list[dict]):
     st.markdown(theme.section_header("안녕하세요, 고객님.", "지금 내 리볼빙 상태를 한눈에 확인해보세요.").strip(), unsafe_allow_html=True)
 
+    # ① 지금 나는 어떤 상태인가 — 오뚝이 마스코트 + 회복 게이지
+    hzb = bundle.get("hazard")
+    rscore = bundle.get("recovery_score", 50.0)
+    mc1, mc2 = st.columns([1, 1])
+    with mc1:
+        mascot.render(bundle["current_risk"], recovery_score=rscore, size_px=72, key="home",
+                      pad="0.85rem 1.1rem")
+    with mc2:
+        hint = rec.recovery_hint(
+            bundle["current_risk"],
+            transition_probability_3m=(hzb.get("transition_probability_3m") if hzb else None),
+        )
+        st.markdown(theme.recovery_gauge_html(rscore, hint=hint), unsafe_allow_html=True)
+
     sub_metrics = theme.metric_row(
         [
             theme.metric_tile("리볼빙 의존도", fmt_pct(bundle["current_carryover_share"])),
@@ -460,7 +615,7 @@ def render_home(bundle: dict, outlook: list[dict]):
             unsafe_allow_html=True,
         )
 
-    st.markdown(theme.section_header("향후 위험 궤적").strip(), unsafe_allow_html=True)
+    mascot.section_with_accent("향후 위험 궤적", "지금 패턴이 유지될 경우 예상되는 변화예요.", accent_key="focus")
     with st.container(border=True):
         st.markdown(
             f'<div style="color:{theme.SUBTLE};font-size:0.9rem;margin-bottom:0.4rem;">'
@@ -470,7 +625,10 @@ def render_home(bundle: dict, outlook: list[dict]):
         )
         st.plotly_chart(charts.risk_trajectory_chart(outlook), width="stretch", config={"displayModeBar": False})
 
-    st.markdown(theme.section_header("핵심 위험 신호", "다음 달 전망에 가장 크게 영향을 준 요인입니다.").strip(), unsafe_allow_html=True)
+    # ④ 언제 위험 단계로 넘어갈 가능성이 있는가 — 이산시간 위험모형(XGBoost와 역할 분리)
+    render_hazard_block(bundle, context="home")
+
+    mascot.section_with_accent("핵심 위험 신호", "다음 달 전망에 가장 크게 영향을 준 요인입니다.", accent_key="analyze")
     signal_lines = []
     for sig in top_signals(bundle, k=3):
         label = FEATURE_LABELS.get(sig["feature"], sig["feature"])
@@ -500,13 +658,26 @@ def render_home(bundle: dict, outlook: list[dict]):
 # 페이지 2: 위험 분석
 # ---------------------------------------------------------------------------
 def render_risk(bundle: dict):
-    top = theme.metric_row(
-        [
-            theme.metric_tile("현재 위험도", bundle["current_risk"]),
-            theme.metric_tile("다음 달 예측 위험도", bundle["predicted_risk"]),
-        ]
+    def _risk_tile(label: str, state: str) -> str:
+        c = theme.RISK_COLORS.get(state, theme.RISK_COLORS["관찰"])["main"]
+        img = mascot.state_img(state, size_px=52)
+        return (
+            f'<div style="flex:1;min-width:150px;background:{theme.SURFACE};border:1px solid {theme.LINE};'
+            f'border-radius:14px;padding:1rem 1.2rem;">'
+            f'<div style="color:{theme.SUBTLE};font-size:0.82rem;font-weight:600;">{label}</div>'
+            f'<div style="display:flex;align-items:center;gap:0.5rem;margin-top:4px;">'
+            f'{img}<div style="color:{c};font-size:1.5rem;font-weight:900;">{state}</div></div></div>'
+        )
+
+    st.markdown(
+        theme.compact_html(
+            f'<div style="display:flex;gap:0.9rem;flex-wrap:wrap;background:{theme.SURFACE};border:1px solid {theme.LINE};'
+            f'border-radius:16px;padding:1rem 1.2rem;margin-bottom:1rem;">'
+            f'{_risk_tile("현재 위험도", bundle["current_risk"])}'
+            f'{_risk_tile("다음 달 예측 위험도", bundle["predicted_risk"])}</div>'
+        ),
+        unsafe_allow_html=True,
     )
-    st.markdown(theme.card_open() + top + theme.card_close(), unsafe_allow_html=True)
 
     st.markdown(theme.section_header("위험도 구성", "네 가지 신호를 종합해 위험 단계를 판정합니다.").strip(), unsafe_allow_html=True)
     rising = "상승 중" if pd.notna(bundle["current_delta_3m"]) and bundle["current_delta_3m"] > 0 else "안정적"
@@ -526,9 +697,10 @@ def render_risk(bundle: dict):
         unsafe_allow_html=True,
     )
 
-    st.markdown(
-        theme.section_header("예측에 영향을 준 주요 요인", "막대가 길수록 영향이 큽니다. 주황색은 위험을 높이는 방향, 청록색은 낮추는 방향이에요.").strip(),
-        unsafe_allow_html=True,
+    mascot.section_with_accent(
+        "예측에 영향을 준 주요 요인",
+        "막대가 길수록 영향이 큽니다. 주황색은 위험을 높이는 방향, 청록색은 낮추는 방향이에요.",
+        accent_key="report",
     )
 
     def shap_section(shap_dict: dict, title: str, k: int = 5):
@@ -575,10 +747,14 @@ def render_risk(bundle: dict):
 # ---------------------------------------------------------------------------
 def render_coaching(bundle: dict, anchor_row, monthly_transaction, derived_features, model_S, model_r, feature_cols, outlook: list[dict]):
     st.markdown(
-        theme.card_open()
-        + '<div style="font-weight:800;font-size:1.05rem;">AI 상환 코칭</div>'
-        + f'<div style="color:{theme.SUBTLE};margin-top:4px;">현재까지의 결제 패턴과 앞으로의 예측 결과를 모두 종합해서 알려드릴게요.</div>'
-        + theme.card_close(),
+        theme.compact_html(
+            f'<div style="background:{theme.SURFACE};border:1px solid {theme.LINE};border-radius:16px;'
+            f'padding:1.1rem 1.4rem;margin-bottom:1rem;display:flex;align-items:center;gap:0.8rem;">'
+            f'{mascot.accent("smile", size_px=56)}'
+            f'<div><div style="font-weight:900;font-size:1.58rem;color:{theme.BRAND};letter-spacing:-0.01em;">AI 상환 코칭</div>'
+            f'<div style="color:{theme.SUBTLE};margin-top:4px;">현재까지의 결제 패턴과 앞으로의 예측 결과를 모두 종합해서 알려드릴게요.</div></div>'
+            f'</div>'
+        ),
         unsafe_allow_html=True,
     )
 
@@ -599,6 +775,25 @@ def render_coaching(bundle: dict, anchor_row, monthly_transaction, derived_featu
         theme.card_open() + badges_html + theme.forecast_timeline_html(steps) + theme.card_close(),
         unsafe_allow_html=True,
     )
+
+    # 회복 서사: 흔들림 → 중심 잡기 (오뚝이의 핵심 메시지). 마스코트 2컷.
+    _shaky, _steady = mascot.accent("shaky", size_px=76), mascot.accent("steady", size_px=76)
+    if _shaky and _steady:
+        st.markdown(
+            theme.compact_html(f"""
+            <div style="display:flex;gap:1rem;align-items:center;justify-content:center;flex-wrap:wrap;
+                        background:{theme.BRAND_SOFT};border-radius:14px;padding:0.9rem 1.2rem;margin-bottom:1rem;">
+                <div style="text-align:center;">{_shaky}
+                    <div style="font-size:0.78rem;color:{theme.SUBTLE};font-weight:700;margin-top:2px;">지금 (흔들리는 중)</div></div>
+                <div style="color:{theme.SUBTLE};font-size:1.5rem;">→</div>
+                <div style="text-align:center;">{_steady}
+                    <div style="font-size:0.78rem;color:{theme.BRAND};font-weight:800;margin-top:2px;">행동을 바꾸면 (중심 회복)</div></div>
+                <div style="flex:1;min-width:180px;color:{theme.INK};font-size:0.9rem;line-height:1.5;">
+                    아래 코칭과 시뮬레이션에서, 어떤 행동을 가정하면 오뚝이가 다시 중심을 잡는지 확인할 수 있어요.</div>
+            </div>
+            """),
+            unsafe_allow_html=True,
+        )
 
     # --- 최소 개입액을 먼저 계산해서, 사용자가 시뮬레이터를 직접 안 돌려봤어도
     #     "얼마를 더 갚으면 되는지"를 코칭 컨텍스트의 simulation 근거로 자동 포함시킨다.
@@ -638,6 +833,7 @@ def render_coaching(bundle: dict, anchor_row, monthly_transaction, derived_featu
         "current_streak": bundle["current_streak"],
         "top_shap_features": top_shap_features_ctx,
         "outlook": [{"month_offset": s["month_offset"], "level": s["level"], "carryover_share": s["carryover_share"]} for s in outlook],
+        "hazard": bundle.get("hazard"),  # 이산시간 위험모형: 전환확률/예상 전환 시점 (source: 'hazard')
         "simulation": simulation_ctx,
     }
 
@@ -648,20 +844,25 @@ def render_coaching(bundle: dict, anchor_row, monthly_transaction, derived_featu
         st.error(f"코칭 메시지 생성/검증 실패: {e}")
         return
 
-    # --- 세그먼트를 카드 여러 개로 잘게 쪼개지 않고, "상황과 이유"(raw_data+shap) 하나로
-    #     묶어 한 흐름으로 읽히게 한다. (예전엔 segment 1개 = 카드 1개라 박스가 쭉 나열돼
-    #     보였고, "상황"과 "원인"이 서로 분리된 별개 카드처럼 느껴진다는 피드백을 반영) ---
-    story_segs = [s for s in segments if s["source"] in ("raw_data", "shap")]
+    # --- 세그먼트를 카드 여러 개로 잘게 쪼개지 않고, "상황·이유·시점"(raw_data+shap+hazard)을
+    #     하나로 묶어 한 흐름으로 읽히게 한다. simulation 근거만 "행동" 카드로 분리한다. ---
+    story_segs = [s for s in segments if s["source"] in ("raw_data", "shap", "hazard")]
     sim_segs = [s for s in segments if s["source"] == "simulation"]
+
+    if message.get("summary"):
+        st.markdown(
+            theme.alert_card("🧭", "한 줄 요약", message["summary"], tone=bundle["predicted_risk"]),
+            unsafe_allow_html=True,
+        )
 
     if story_segs:
         story_html = "".join(f'<p style="margin:0 0 0.85rem 0;">{theme.highlight_text(seg["text"])}</p>' for seg in story_segs)
-        st.markdown(theme.big_section_title("📊 지금 상황과 이유", accent=theme.BRAND), unsafe_allow_html=True)
+        mascot.section_with_accent("지금 상황과 이유, 그리고 시점", accent_key="report")
         st.markdown(theme.coaching_card(story_html, accent=theme.BRAND), unsafe_allow_html=True)
 
     # --- 최소 개입액(또는 사용자가 직접 돌려본 시뮬레이션 결과)을 "지금 할 수 있는 행동"
     #     하나의 카드 안에 숫자 + LLM 설명 문장을 함께 묶어서 보여준다. ---
-    st.markdown(theme.big_section_title("🎯 지금 할 수 있는 행동", accent=theme.RISK_COLORS["관찰"]["main"]), unsafe_allow_html=True)
+    mascot.section_with_accent("지금 할 수 있는 행동", accent_key="strategy")
     sim_narrative = "".join(f'<p style="margin:0.6rem 0 0 0;">{theme.highlight_text(seg["text"])}</p>' for seg in sim_segs)
     if auto_intervention:
         action_html = (
@@ -704,6 +905,27 @@ def render_simulator(bundle: dict, anchor_row, monthly_transaction, derived_feat
     )
 
     L = int(bundle["L"])
+
+    # --- 🎯 오뚝이 회복 미션 (경량) : 포인트/뱃지 없음. 기존 simulate_extra_payment() 재사용 진입점일 뿐. ---
+    P_t = float(bundle["B_current"]) + float(bundle["pred_S"])
+    mission_extra = int(round(min(0.05 * P_t, L) / 10_000) * 10_000)  # 약정결제비율 +5%p 에 해당하는 추가 상환액
+    _acc_ap = theme.RISK_COLORS["주의"]["main"]
+    st.markdown(
+        theme.compact_html(
+            f'<div style="background:{theme.SURFACE};border:1px dashed {_acc_ap}80;border-left:4px solid {_acc_ap};'
+            f'border-radius:14px;padding:1.1rem 1.3rem;margin:0.6rem 0;display:flex;gap:0.8rem;align-items:flex-start;">'
+            f'{mascot.accent("applaud", size_px=58)}'
+            f'<div><div style="font-weight:900;color:{theme.BRAND};font-size:1.53rem;margin-bottom:0.4rem;letter-spacing:-0.01em;">🎯 이번 달 오뚝이 미션</div>'
+            f'<div style="color:{theme.INK};font-size:0.93rem;line-height:1.55;">'
+            f'약정결제비율을 지금보다 <b>약 5%p</b> 높여보는 시나리오예요 (추가 상환 약 <b>{mission_extra:,.0f}원</b>에 해당). '
+            f'아래 버튼을 누르면 이 값이 시뮬레이션에 적용돼요 — 미션 달성이 아니라, 행동을 바꿨을 때 '
+            f'<b>모델 출력이 실제로 어떻게 변하는지</b> 확인하는 게 목적이에요.</div></div></div>'
+        ),
+        unsafe_allow_html=True,
+    )
+    if st.button("이 미션 시나리오 적용해보기", key="apply_mission"):
+        st.session_state["prefill_extra_payment"] = mission_extra
+        st.rerun()
     SLIDER_KEY, NUMBER_KEY = "extra_payment_slider_widget", "extra_payment_number_widget"
 
     # 슬라이더/숫자입력 두 위젯을 같은 값으로 동기화한다. 위젯에 key가 이미 지정돼 있으면
@@ -750,6 +972,7 @@ def render_simulator(bundle: dict, anchor_row, monthly_transaction, derived_feat
         minimum_payment_streak=new_streak,
         warn_threshold=RISK_LEVEL_THRESHOLD_DEFAULT,
     )
+    _sim_recovery = rec.recovery_score(new_risk, sim_calc["carryover_share"])
     st.session_state["simulation_result"] = {
         "extra_payment": extra_payment,
         "new_predicted_carryover_share": sim_calc["carryover_share"],
@@ -780,9 +1003,38 @@ def render_simulator(bundle: dict, anchor_row, monthly_transaction, derived_feat
         <div style="padding:0.9rem;border-top:1px solid {theme.LINE};">3개월 후 위험도</div>
         <div style="padding:0.9rem;border-top:1px solid {theme.LINE};text-align:center;">—</div>
         <div style="padding:0.9rem;border-top:1px solid {theme.LINE};text-align:center;">{theme.risk_badge_html(level_3m, 'sm')}</div>
+        <div style="padding:0.9rem;border-top:1px solid {theme.LINE};">오뚝이 회복 게이지</div>
+        <div style="padding:0.9rem;border-top:1px solid {theme.LINE};text-align:center;">{bundle.get('predicted_recovery_score', 0):.0f}</div>
+        <div style="padding:0.9rem;border-top:1px solid {theme.LINE};text-align:center;font-weight:800;color:{theme.BRAND};">{_sim_recovery:.0f}</div>
     </div>
     """)
     st.markdown(compare_html, unsafe_allow_html=True)
+
+    # 회복 게이지 + 마스코트 갱신 (시뮬레이션 상태 반영) + hazard 재계산
+    _dscore = _sim_recovery - bundle.get("predicted_recovery_score", _sim_recovery)
+    _mc1, _mc2 = st.columns([1, 2])
+    with _mc1:
+        mascot.render(new_risk, recovery_score=_sim_recovery, size_px=120, key="sim",
+                      caption=("시나리오를 적용하면 오뚝이 상태가 이렇게 바뀌는 것으로 계산돼요."
+                               if extra_payment > 0 else None))
+    with _mc2:
+        st.markdown(
+            theme.recovery_gauge_html(
+                _sim_recovery,
+                delta=_dscore,
+                hint=rec.recovery_hint(new_risk, simulation_delta_score=_dscore),
+            ),
+            unsafe_allow_html=True,
+        )
+    _sim_hzb = _simulated_hazard_bundle(anchor_row, bundle, sim_calc, new_risk, new_delta_3m, new_streak)
+    if bundle.get("hazard") and bundle["hazard"].get("applicable") and _sim_hzb and _sim_hzb.get("applicable"):
+        _b = bundle["hazard"].get("transition_probability_3m")
+        _a = _sim_hzb.get("transition_probability_3m")
+        if _b is not None and _a is not None:
+            st.caption(
+                f"위험 전환 모형 기준 향후 3개월 경고 전환 가능성: {_b*100:.0f}% → 시나리오 적용 시 {_a*100:.0f}% "
+                f"(입력한 가정에 따른 추정치)"
+            )
 
     if extra_payment > 0:
         st.markdown(
@@ -794,7 +1046,7 @@ def render_simulator(bundle: dict, anchor_row, monthly_transaction, derived_feat
             unsafe_allow_html=True,
         )
 
-    st.markdown(theme.section_header("🎯 최소 개입액", "위험 단계를 '경고' 미만으로 유지하기 위한 최소 금액입니다.").strip(), unsafe_allow_html=True)
+    mascot.section_with_accent("🎯 최소 개입액", "위험 단계를 '경고' 미만으로 유지하기 위한 최소 금액입니다.", accent_key="strategy")
     with st.spinner("계산 중..."):
         min_intervention = find_minimum_intervention(
             model_S, model_r, feature_cols, anchor_row, monthly_transaction, derived_features, horizon=3, target_max_level="경고"
@@ -824,33 +1076,53 @@ def render_simulator(bundle: dict, anchor_row, monthly_transaction, derived_feat
         ).strip(),
         unsafe_allow_html=True,
     )
-    preset_amounts = [0, 50_000, 100_000, 150_000]
+    # 시나리오: 현재 유지 / 정액 추가상환 3종 / 약정결제비율 +5%p·+10%p (스펙 10번)
+    _r5 = int(round(min(0.05 * P_t, L) / 10_000) * 10_000)
+    _r10 = int(round(min(0.10 * P_t, L) / 10_000) * 10_000)
+    preset_specs = [
+        (0, "현재 유지"), (50_000, "월 +5만"), (100_000, "월 +10만"),
+        (_r5, "결제비율 +5%p"), (_r10, "결제비율 +10%p"),
+    ]
     with st.spinner("금액별 시나리오를 계산하는 중..."):
         scenario_results = []
-        for amt in preset_amounts:
+        for amt, lab in preset_specs:
             amt_capped = min(amt, L)
             preset_traj = simulate_intervention_trajectory(model_S, model_r, feature_cols, anchor_row, mt_idx, df_idx, amt_capped, horizon=3)
             final_step = preset_traj[-1] if preset_traj else {"level": bundle["predicted_risk"], "carryover_share": bundle["predicted_carryover_share"]}
-            scenario_results.append({"extra_payment": amt_capped, "level": final_step["level"], "carryover_share": final_step["carryover_share"]})
+            scenario_results.append({
+                "extra_payment": amt_capped, "label": lab, "level": final_step["level"],
+                "carryover_share": final_step["carryover_share"],
+                "recovery_score": rec.recovery_score(final_step["level"], final_step["carryover_share"]),
+            })
+    preset_amounts = [s["extra_payment"] for s in scenario_results]
 
     with st.container(border=True):
         st.plotly_chart(charts.intervention_comparison_chart(scenario_results), width="stretch", config={"displayModeBar": False})
         st.caption("막대 색은 3개월 뒤 예측되는 위험 단계를 나타냅니다.")
 
     baseline_level = scenario_results[0]["level"]
-    cmp_cols = st.columns(len(preset_amounts))
+    base_rscore = scenario_results[0]["recovery_score"]
+    cmp_cols = st.columns(len(scenario_results))
     for col, sc in zip(cmp_cols, scenario_results):
         with col:
+            gauge_line = (
+                f'<div style="margin-top:6px;font-size:0.8rem;color:{theme.SUBTLE};">회복 게이지 '
+                f'<b style="color:{theme.INK};">{sc["recovery_score"]:.0f}</b>'
+                + (f' <span style="color:{theme.RISK_COLORS["관찰"]["main"] if sc["recovery_score"]>=base_rscore else theme.RISK_COLORS["경고"]["main"]};">'
+                   f'({sc["recovery_score"]-base_rscore:+.0f})</span>' if sc is not scenario_results[0] else "")
+                + "</div>"
+            )
             if sc["extra_payment"] == 0:
-                body = f'<div style="text-align:center;"><b>현재 그대로</b><br><br>{theme.risk_badge_html(sc["level"], "sm")}</div>'
+                body = f'<div style="text-align:center;"><b>{sc["label"]}</b><br><br>{theme.risk_badge_html(sc["level"], "sm")}{gauge_line}</div>'
                 accent = theme.SUBTLE
             else:
                 improved = theme.RISK_ORDER[sc["level"]] < theme.RISK_ORDER[baseline_level]
                 verb = "낮아집니다" if improved else "유지됩니다"
-                sentence = f'월 {sc["extra_payment"]:,.0f}원을 더 갚으면, 3개월 뒤 위험 단계가 {baseline_level}에서 {sc["level"]}로 {verb}.'
+                sentence = f'{sc["label"]}(추가 상환 약 {sc["extra_payment"]:,.0f}원) 가정 시, 3개월 뒤 위험 단계가 {baseline_level}에서 {sc["level"]}로 {verb}.'
                 body = (
-                    f'<div style="text-align:center;">{theme.risk_badge_html(baseline_level, "sm")} → {theme.risk_badge_html(sc["level"], "sm")}</div>'
-                    f'<div style="margin-top:8px;font-size:0.82rem;">{theme.highlight_text(sentence)}</div>'
+                    f'<div style="text-align:center;font-weight:800;">{sc["label"]}</div>'
+                    f'<div style="text-align:center;margin-top:4px;">{theme.risk_badge_html(baseline_level, "sm")} → {theme.risk_badge_html(sc["level"], "sm")}</div>'
+                    f'<div style="margin-top:8px;font-size:0.8rem;">{theme.highlight_text(sentence)}</div>{gauge_line}'
                 )
                 accent = theme.BRAND if improved else theme.SUBTLE
             st.markdown(theme.coaching_card(body, accent=accent), unsafe_allow_html=True)
@@ -865,11 +1137,15 @@ def render_simulator(bundle: dict, anchor_row, monthly_transaction, derived_feat
 def render_trust():
     model_metrics, risk_sensitivity, shap_importance = load_metrics_outputs()
 
+    _acc = mascot.accent("analyze", size_px=56)
     st.markdown(
-        theme.card_open()
-        + '<div style="font-weight:800;font-size:1.1rem;">모델 신뢰도</div>'
-        + f'<div style="color:{theme.SUBTLE};margin-top:4px;">이 서비스의 예측 결과가 어떻게 검증되었는지 공개합니다.</div>'
-        + theme.card_close(),
+        theme.compact_html(f"""
+        <div style="display:flex;align-items:center;gap:0.8rem;background:{theme.SURFACE};
+                    border:1px solid {theme.LINE};border-radius:16px;padding:1.2rem 1.4rem;margin-bottom:1rem;">
+            {_acc}
+            <div><div style="font-weight:900;font-size:1.65rem;color:{theme.BRAND};letter-spacing:-0.01em;">모델 신뢰도</div>
+                 <div style="color:{theme.SUBTLE};margin-top:4px;">이 서비스의 예측 결과가 어떻게 검증되었는지 공개합니다.</div></div>
+        </div>"""),
         unsafe_allow_html=True,
     )
 
@@ -904,6 +1180,83 @@ def render_trust():
     fig.update_layout(height=320, xaxis_title="예측 개월수", yaxis_title="MAE (%p)", margin=dict(l=10, r=10, t=20, b=10))
     st.plotly_chart(fig, width="stretch")
     st.caption(model_metrics["notes"]["recursive_multistep_horizon_1"])
+
+    # ------------------------------------------------------------------
+    # Hazard Model (보완 모델) 성능 — XGBoost와 별도
+    # ------------------------------------------------------------------
+    hm = load_hazard_metrics()
+    st.markdown(
+        theme.section_header(
+            "위험 전환 모형 (Discrete-time Hazard Model)",
+            "XGBoost와 역할이 다른 보완 모델입니다: '언제 경고/심화 단계로 넘어갈 가능성이 있는가'.",
+        ).strip(),
+        unsafe_allow_html=True,
+    )
+    if hm is None:
+        st.info("outputs/hazard_metrics.json 이 없습니다. `python scripts/train_hazard.py` 를 먼저 실행하세요.")
+    else:
+        pp = hm["person_period"]
+        cv = hm["account_5fold_cv"]
+        ts = hm["temporal_split"]
+        cvb = hm["c_index_vs_baseline"]
+        cols = st.columns(4)
+        with cols[0]:
+            st.markdown(theme.metric_tile("person-period 행 / 전환 이벤트",
+                        f"{pp['n_person_period_rows']:,} / {pp['n_events_total']}",
+                        note=f"censored {pp['n_censored']}계좌 · already_high_risk {pp['n_already_high_risk_excluded']}계좌"),
+                        unsafe_allow_html=True)
+        with cols[1]:
+            st.markdown(theme.metric_tile("C-index (계좌 5-fold CV)",
+                        f"{cv['account_3m_c_index_mean']}",
+                        note=f"std {cv['account_3m_c_index_std']} · KM baseline 0.5 대비 +{cvb['relative_improvement_pct_over_baseline']}%"),
+                        unsafe_allow_html=True)
+        with cols[2]:
+            st.markdown(theme.metric_tile("C-index (시간분할 test)",
+                        f"{ts['three_month_transition_eval']['c_index']}",
+                        note=f"전환 이벤트 {ts['test_events']}건" + (" ⚠️ <30, CI 넓음" if ts["small_sample_warning"] else "")),
+                        unsafe_allow_html=True)
+        with cols[3]:
+            st.markdown(theme.metric_tile("person-period Brier (CV)",
+                        f"{cv['person_period_brier_mean']}",
+                        note="naive ≈ 0.10 · hazard 5분위 보정 양호"),
+                        unsafe_allow_html=True)
+        if ts.get("small_sample_note"):
+            st.warning(ts["small_sample_note"])
+        st.caption(
+            "calibration 주의: " + hm.get("calibration_caveat", {}).get("three_month_transition_probability", "")
+        )
+
+        with st.expander("위험 전환 모형 상세 (KM baseline · calibration · 위험군별 이벤트율 · 한계)"):
+            km = hm["kaplan_meier_baseline"]
+            st.markdown("**Kaplan-Meier baseline 생존함수 (개인화 없음)**")
+            st.table(pd.DataFrame({"개월(t)": list(km.keys()), "S(t)": list(km.values())}).set_index("개월(t)"))
+            st.markdown("**예측 hazard 5분위별 실제 이벤트율 (calibration)**")
+            st.table(pd.DataFrame(hm["risk_group_event_rates_hazard_quintile"]).set_index("hazard_quintile"))
+            st.markdown("**계좌 5-fold CV — 3개월 전환확률 calibration (pooled)**")
+            st.table(pd.DataFrame(cv["account_3m_calibration_pooled"]))
+            st.markdown("**duration 항 비교**")
+            st.json(hm["duration_spec_comparison"])
+            st.markdown("**features / leakage 통제 / 알려진 한계**")
+            st.write("features:", hm["features"])
+            for n in hm["leakage_controls"]:
+                st.caption("• " + n)
+            for n in hm["known_limitations"]:
+                st.caption("⚠ " + n)
+            st.markdown("**전환확률/예상 전환 시점 예시**")
+            st.table(pd.DataFrame(hm["examples_transition_probability"]))
+
+        # 마스코트 상태 매핑 상태 (전문가/심사위원 확인용)
+        ms = mascot.mapping_status()
+        st.markdown(theme.section_header("오뚝이 마스코트 상태 매핑").strip(), unsafe_allow_html=True)
+        if ms.get("needs_confirmation"):
+            st.warning("state_mapping.json 은 위치 기반 추정 매핑입니다 — 각 이미지를 열어 최종 확인 필요. "
+                       + ms.get("confidence_note", ""))
+        st.caption("risk_indicator → 캐릭터 이미지 (state_mapping.json)")
+        st.table(pd.DataFrame([{"상태": k, "파일": v["file"], "파일존재": v["exists"]} for k, v in ms["states"].items()]))
+        if ms.get("accents"):
+            st.caption("화면 곳곳의 표정/몸짓 accent (state_mapping.json → accents)")
+            st.table(pd.DataFrame([{"accent": k, "파일": v["file"], "파일존재": v["exists"], "추정 의미": v.get("추정", "")}
+                                   for k, v in ms["accents"].items()]))
 
     st.markdown(theme.section_header("모델의 한계").strip(), unsafe_allow_html=True)
     st.markdown(
@@ -943,7 +1296,12 @@ def render_trust():
 # ---------------------------------------------------------------------------
 # 앱 본체
 # ---------------------------------------------------------------------------
-st.set_page_config(page_title="오뚝이 | 리볼빙 조기경보", layout="wide", page_icon="🪆")
+_favicon = BASE_DIR / "assets" / "mascot" / "favicon_face.png"
+st.set_page_config(
+    page_title="오뚝이 | 리볼빙 조기경보",
+    layout="wide",
+    page_icon=str(_favicon) if _favicon.exists() else "🪆",
+)
 theme.inject_global_css()
 
 account_master, monthly_transaction, derived_features, feature_table = load_data()
@@ -966,6 +1324,12 @@ bundle = build_prediction_bundle(
     anchor_row, monthly_transaction, derived_features, model_S, model_r, feature_cols, explainer_S, explainer_r
 )
 outlook = multi_month_outlook(bundle, anchor_row, monthly_transaction, derived_features, model_S, model_r, feature_cols, horizon=3)
+
+# --- Hazard Model(보완) + 회복 게이지 : 계산은 src/hazard.py, src/recovery.py ---
+_arow = anchor_row.iloc[0]
+bundle["hazard"] = compute_hazard_bundle(_arow, bundle["current_risk"], bundle["month_index"])
+bundle["recovery_score"] = rec.recovery_score(bundle["current_risk"], bundle["current_carryover_share"])
+bundle["predicted_recovery_score"] = rec.recovery_score(bundle["predicted_risk"], bundle["predicted_carryover_share"])
 
 st.markdown(
     theme.page_header("오뚝이", "리볼빙 조기경보 & AI 상환 코칭", right_html=theme.demo_mode_badge(demo_label)),

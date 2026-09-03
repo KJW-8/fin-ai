@@ -59,13 +59,16 @@ LINE = "#e4e8eb"
 SURFACE = "#ffffff"
 PAGE_BG = "#f2f4f7"      # 라이트 그레이 (배경)
 
-# 사이드바: 화이트로 뒀더니 "안정감 있게 딱 잡히는 사이트 같지 않다"는 피드백을 받아
-# 진한 브랜드 컬러(딥 티얼)로 바꿨다. 어두운 배경이라 사이드바 안의 텍스트 색 토큰을
-# 별도로 둔다(밝은 배경용 INK/SUBTLE을 그대로 쓰면 안 보인다).
-SIDEBAR_BG = BRAND
-SIDEBAR_TEXT = "#f3f8f7"
-SIDEBAR_TEXT_MUTED = "#a9cbc7"
-SIDEBAR_HOVER = "rgba(255,255,255,0.10)"
+# 사이드바: 딥 티얼로 뒀더니 마스코트 몸통색(#0F4C4C)과 겹쳐 캐릭터가 배경에 묻혀서,
+# 흰끼가 많이 도는 옅은 청록/연두 톤으로 바꿨다. 밝은 배경이라 사이드바 텍스트는
+# 어두운 톤을 쓰고, 선택된 nav 탭만 딥 티얼로 강조한다.
+SIDEBAR_BG = "#dcebe4"           # 옅은 세이지-청록 (washed teal-green)
+SIDEBAR_TEXT = "#173a37"         # 어두운 티얼 (밝은 배경에서 가독)
+SIDEBAR_TEXT_MUTED = "#5b7b75"
+SIDEBAR_HOVER = "rgba(15,76,76,0.07)"
+SIDEBAR_LINE = "rgba(15,76,76,0.13)"
+SIDEBAR_SELECTED_BG = BRAND       # 선택 탭 = 딥 티얼
+SIDEBAR_SELECTED_TEXT = "#ffffff"
 
 
 def compact_html(html: str) -> str:
@@ -106,7 +109,7 @@ def inject_global_css() -> None:
         /* 사이드바 — 진한 브랜드 컬러 배경으로 "안정감 있게 잡히는" 느낌을 준다 */
         section[data-testid="stSidebar"] {{
             background: {SIDEBAR_BG};
-            border-right: 1px solid {SIDEBAR_BG};
+            border-right: 1px solid {SIDEBAR_LINE};
         }}
         section[data-testid="stSidebar"] .block-container {{
             padding-top: 1.6rem;
@@ -151,15 +154,15 @@ def inject_global_css() -> None:
             box-sizing: border-box !important;
             padding: 0;
             margin: 0;
-            border-radius: 0;
-            border-bottom: 1px solid rgba(255,255,255,0.16);
+            border-radius: 8px;
+            border-bottom: 1px solid {SIDEBAR_LINE};
             transition: background 0.12s ease;
         }}
         section[data-testid="stSidebar"] label[data-testid="stRadioOption"] > div {{
             width: 100%;
         }}
         section[data-testid="stSidebar"] label[data-testid="stRadioOption"]:first-child {{
-            border-top: 1px solid rgba(255,255,255,0.16);
+            border-top: 1px solid {SIDEBAR_LINE};
         }}
         /* 원형 인디케이터 숨김 */
         section[data-testid="stSidebar"] label[data-testid="stRadioOption"] > div > div > div:first-child {{
@@ -177,16 +180,14 @@ def inject_global_css() -> None:
         section[data-testid="stSidebar"] label[data-testid="stRadioOption"]:hover {{
             background: {SIDEBAR_HOVER};
         }}
-        /* 선택된 항목: 왼쪽 강조선 + 배경 + 굵게 */
+        /* 선택된 항목: 딥 티얼 배경 + 흰 글씨 (청록색 강조 탭) */
         section[data-testid="stSidebar"] label[data-testid="stRadioOption"][data-selected="true"] {{
-            background: rgba(255,255,255,0.11);
-            border-left: 3px solid {SIDEBAR_TEXT};
-        }}
-        section[data-testid="stSidebar"] label[data-testid="stRadioOption"][data-selected="true"] [data-testid="stMarkdownContainer"] {{
-            padding-left: calc(0.9rem - 3px);
+            background: {SIDEBAR_SELECTED_BG};
+            border-color: {SIDEBAR_SELECTED_BG};
         }}
         section[data-testid="stSidebar"] label[data-testid="stRadioOption"][data-selected="true"] p {{
             font-weight: 800 !important;
+            color: {SIDEBAR_SELECTED_TEXT} !important;
         }}
         /* 사이드바 안 expander("고객 정보 입력")는 흰색 카드로 띄워 어두운 배경과
            대비시키고, 그 안의 라벨/캡션은 원래(밝은 배경용) 색으로 되돌린다 */
@@ -279,7 +280,7 @@ def page_header(title: str, subtitle: str, right_html: str = "") -> str:
                 border-radius:16px;margin-bottom:1.4rem;">
         <div>
             <div style="font-size:1.35rem;font-weight:800;color:{BRAND};letter-spacing:-0.01em;">
-                {yoga_icon_svg(BRAND, size=20)} 오뚝이
+                오뚝이
             </div>
             <div style="font-size:0.85rem;color:{SUBTLE};margin-top:2px;">{subtitle}</div>
         </div>
@@ -406,6 +407,47 @@ def metric_row(tiles_html: list[str]) -> str:
     return f'<div style="display:flex;gap:0.9rem;flex-wrap:wrap;margin:0.8rem 0;">{"".join(tiles_html)}</div>'
 
 
+def recovery_gauge_html(score: float, *, hint: str = "", delta: float | None = None, fill_height: bool = False) -> str:
+    """오뚝이 회복 게이지 (0~100 진행률 바). 숫자/막대 기반 — 캐릭터가 게이지를 대체하지 않는다.
+
+    색은 점수 구간에 따라 위험색 4단계를 재사용한다(75+ 관찰, 50+ 주의, 25+ 경고, 그 이하 심화).
+    fill_height=True: 옆 카드(마스코트)와 높이를 맞추도록 부모 높이를 채운다.
+    """
+    score = max(0.0, min(100.0, float(score)))
+    tone = "관찰" if score >= 75 else "주의" if score >= 50 else "경고" if score >= 25 else "심화"
+    c = RISK_COLORS[tone]["main"]
+    delta_html = ""
+    if delta is not None and abs(delta) >= 0.5:
+        arrow = "▲" if delta > 0 else "▼"
+        dcol = RISK_COLORS["관찰"]["main"] if delta > 0 else RISK_COLORS["경고"]["main"]
+        delta_html = f'<span style="color:{dcol};font-size:0.9rem;font-weight:800;margin-left:8px;">{arrow} {abs(delta):.0f}</span>'
+    hint_html = f'<div style="color:{SUBTLE};font-size:0.85rem;margin-top:0.5rem;line-height:1.45;">{hint}</div>' if hint else ""
+    h = "height:100%;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;" if fill_height else ""
+    return compact_html(f"""
+    <div style="background:{SURFACE};border:1px solid {LINE};border-radius:16px;padding:0.95rem 1.2rem;margin:0.6rem 0;{h}">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;">
+            <div style="color:{SUBTLE};font-size:0.85rem;font-weight:700;">오뚝이 회복 게이지</div>
+            <div><span style="color:{c};font-size:1.8rem;font-weight:900;">{score:.0f}</span>
+                 <span style="color:{SUBTLE};font-size:0.9rem;">/ 100</span>{delta_html}</div>
+        </div>
+        <div style="background:{PAGE_BG};border-radius:999px;height:13px;margin-top:0.55rem;overflow:hidden;">
+            <div style="width:{score:.1f}%;height:100%;background:{c};border-radius:999px;transition:width 0.5s ease;"></div>
+        </div>
+        {hint_html}
+    </div>
+    """)
+
+
+def mission_card_html(title: str, body_html: str, *, accent: str = BRAND) -> str:
+    return compact_html(f"""
+    <div style="background:{SURFACE};border:1px dashed {accent}80;border-left:4px solid {accent};
+                border-radius:14px;padding:1.1rem 1.3rem;margin:0.6rem 0;">
+        <div style="font-weight:900;color:{accent};font-size:1.02rem;margin-bottom:0.4rem;">{title}</div>
+        <div style="color:{INK};font-size:0.93rem;line-height:1.55;">{body_html}</div>
+    </div>
+    """)
+
+
 def card_open(padding: str = "1.4rem 1.6rem") -> str:
     return f'<div style="background:{SURFACE};border:1px solid {LINE};border-radius:16px;padding:{padding};margin-bottom:1rem;">'
 
@@ -448,7 +490,7 @@ def definitions_panel(items: list[tuple[str, str]]) -> str:
     body = "".join(rows)
     return compact_html(f"""
     <div style="background:{PAGE_BG};border:1px solid {LINE};border-radius:12px;padding:0.9rem 1.2rem;margin-top:0.6rem;">
-        <div style="color:{SUBTLE};font-size:0.78rem;font-weight:800;margin-bottom:4px;letter-spacing:0.03em;">ℹ️ 이 수치는 어떻게 계산되나요?</div>
+        <div style="color:{SUBTLE};font-size:0.78rem;font-weight:800;margin-bottom:4px;letter-spacing:0.03em;">이 수치는 어떻게 계산되나요?</div>
         {body}
     </div>
     """)

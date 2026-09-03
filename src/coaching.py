@@ -20,11 +20,15 @@ import jsonschema
 
 MODEL_NAME = "claude-haiku-4-5-20251001"
 
-VALID_SOURCES = ("raw_data", "shap", "simulation")
+# 2026-09: 'hazard' 추가 — 이산시간 위험모형(src/hazard.py)이 산출한 전환확률/생존확률/
+# 예상 전환 시점을 인용한 문장에 붙인다. raw_data/shap/simulation 과 동일한 일치성 검증 대상.
+VALID_SOURCES = ("raw_data", "shap", "hazard", "simulation")
 
 COACHING_MESSAGE_SCHEMA = {
     "type": "object",
     "properties": {
+        # summary: 카드 상단 한 줄 요약(선택). 근거 태깅은 segments 에만 적용된다.
+        "summary": {"type": "string"},
         "segments": {
             "type": "array",
             "minItems": 1,
@@ -37,7 +41,7 @@ COACHING_MESSAGE_SCHEMA = {
                 "required": ["text", "source"],
                 "additionalProperties": False,
             },
-        }
+        },
     },
     "required": ["segments"],
     "additionalProperties": False,
@@ -138,8 +142,13 @@ def available_sources_for_context(context: dict) -> set[str]:
 
     simulation 근거는 사용자가 상환 시뮬레이터를 실행했을 때만 존재하므로, context에
     simulation 결과가 없으면 "simulation" 태그를 쓰는 것 자체가 근거 없는 태깅이다.
+    hazard 근거는 hazard 모델이 적용 가능하고(관찰/주의 단계) 실제 전환확률이 계산된
+    경우에만 존재한다 — 이미 경고/심화인 사용자는 hazard 이벤트를 이미 겪었으므로 없다.
     """
     sources = {"raw_data", "shap"}
+    hz = context.get("hazard")
+    if hz and hz.get("applicable") and hz.get("transition_probability_3m") is not None:
+        sources.add("hazard")
     if context.get("simulation"):
         sources.add("simulation")
     return sources
@@ -222,6 +231,32 @@ def mock_generate_coaching_message(context: dict) -> dict:
             }
         )
 
+    # hazard 근거: 이산시간 위험모형의 향후 3개월 전환확률 / 예상 전환 시점.
+    hz = context.get("hazard")
+    if hz and hz.get("applicable") and hz.get("transition_probability_3m") is not None:
+        tp3 = hz["transition_probability_3m"]
+        mtw = hz.get("median_time_to_warning")
+        if mtw:
+            segments.append(
+                {
+                    "text": (
+                        f"위험 전환 모형으로 보면, 지금 패턴이 유지될 경우 향후 3개월 안에 '경고' 단계로 "
+                        f"넘어갈 가능성은 약 {tp3 * 100:.0f}%이고, 약 {mtw}개월 후 그 가능성이 절반을 넘는 것으로 계산돼요."
+                    ),
+                    "source": "hazard",
+                }
+            )
+        else:
+            segments.append(
+                {
+                    "text": (
+                        f"위험 전환 모형 기준으로는, 지금 패턴이 유지되어도 향후 3개월 안에 '경고' 단계로 넘어갈 "
+                        f"가능성은 약 {tp3 * 100:.0f}%로, 관측 기간 내 전환 가능성은 낮은 편이에요."
+                    ),
+                    "source": "hazard",
+                }
+            )
+
     level_templates = {
         "관찰": "현재는 결제 패턴이 안정적으로 유지되고 있어요. 지금처럼만 유지하시면 좋습니다.",
         "주의": (
@@ -255,32 +290,53 @@ def mock_generate_coaching_message(context: dict) -> dict:
                 }
             )
 
-    return {"segments": segments}
+    summary_by_risk = {
+        "관찰": "지금은 안정적인 상태예요. 큰 변화 없이 유지하시면 됩니다.",
+        "주의": "리볼빙 의존도가 조금씩 올라오고 있어요. 지금이 결제 방식을 살펴볼 좋은 시점이에요.",
+        "경고": "결제 여유가 얼마 남지 않았어요. 지금 상환 방식을 바꾸면 효과가 큰 구간이에요.",
+        "심화": "지금은 어려운 상태지만, 시뮬레이션으로 바꿀 수 있는 방향을 함께 찾아봐요.",
+    }
+    return {"summary": summary_by_risk.get(risk, summary_by_risk["관찰"]), "segments": segments}
 
 
 # ---------------------------------------------------------------------------
 # real 구현 — Claude Haiku 4.5 호출 (API 키 필요, UI 완성 후 전환 예정)
 # ---------------------------------------------------------------------------
-SYSTEM_PROMPT = """당신은 '오뚝이'라는 리볼빙(일부결제금액이월약정) 조기경보 서비스의 코칭 메시지 작성자입니다.
-사용자에게 제공된 실측_데이터(현재_상태 포함), 예측에_영향을_준_요인(모델이 다음 달을 예측할 때
-반영한 요인들 — 보통 여러 개가 함께 옵니다), 향후_3개월_전망(월별 예측 궤적),
-상환_시뮬레이션_결과(추가 상환 시 예상 변화, 있을 때만) 근거를 바탕으로 공감적이고 실행 가능한
-코칭 문장을 작성하세요.
+SYSTEM_PROMPT = """당신은 '오뚝이'라는 리볼빙(일부결제금액이월약정) 조기경보 서비스의 AI 회복 코치입니다.
+당신의 역할은 수치 모델이 이미 계산해 둔 결과를 사용자가 이해하고 스스로 행동을 선택하도록
+돕는 것입니다. 당신은 어떤 숫자도 직접 계산하지 않습니다 — 위험도, 확률, 전환 시점, 상환액,
+SHAP, 시뮬레이션 결과는 모두 Python 모델이 계산한 값이고, 당신은 그 값을 해석·설명만 합니다.
+
+받는 근거:
+- 실측_데이터(현재_상태 포함)
+- 예측에_영향을_준_요인 (모델이 다음 달을 예측할 때 반영한 요인들 — 보통 여러 개)
+- 향후_3개월_전망 (XGBoost 재귀 예측의 월별 궤적)
+- 위험_전환_전망 (별도의 이산시간 위험모형: 향후 3개월 안에 '경고' 단계로 넘어갈 확률,
+  예상 전환 시점 — 있을 때만. XGBoost 전망과 역할이 다릅니다: 전망은 '값이 어떻게 움직일까',
+  위험_전환_전망은 '언제 위험 단계로 넘어갈 가능성이 있을까')
+- 상환_시뮬레이션_결과 (추가 상환/결제비율 조정 시 예상 변화 — 있을 때만)
+
+AI 코치로서 다음을 담으세요 (근거가 있는 항목만):
+  1) 지금 어떤 상태인지
+  2) 왜 그렇게 되고 있는지 (예측에_영향을_준_요인)
+  3) 언제 위험 단계로 넘어갈 가능성이 있는지 (위험_전환_전망)
+  4) 상환 행동을 바꾸면 어떤 변화가 예상되는지 (상환_시뮬레이션_결과)
+  5) 사용자가 선택할 수 있는 행동을 부드럽게 제시 (강요·단정 금지)
 
 핵심 지시 — 종합적이지만 정돈된 개인 맞춤 코칭:
-이 사용자만을 위한 코칭이 되도록, 받은 근거 항목들을 따로따로 나열하지 말고 하나의 이야기처럼
-엮어서 설명하세요. 화면에는 segment 하나가 카드 하나로 표시되므로, 관련된 내용(예: 현재 상태와
-그 이유가 되는 요인 여러 개)은 여러 segment로 잘게 쪼개지 말고 하나의 segment 안에 자연스러운
-문단으로 함께 녹여서 설명하세요.
-전체 흐름은 대략 다음 3~5개 segment로 구성하는 것을 기준으로 삼으세요 (근거가 부족하면 더 적어도
-됩니다):
-  1) raw_data: 현재 상태 + 다음 달 예측을 함께 묶어 설명
-  2) shap: 예측에_영향을_준_요인들을 원인으로 묶어 설명 (요인이 여러 개면 한 문단 안에서 함께 언급)
-  3) raw_data: 향후_3개월_전망을 반영해 이대로면 어떻게 되는지 설명
-  4) simulation: 상환_시뮬레이션_결과가 있을 때만, 그걸 반영한 행동 제안
-segment를 과도하게 쪼개 카드가 여러 개로 나열되면 오히려 읽기 피곤해지므로, 위 기준보다 많은
-segment를 만들지 마세요. 각 segment는 반드시 아래 source 규칙에서 벗어나지 않는 범위 안에서만
-작성하세요 (근거 없는 내용을 지어내지 마세요).
+받은 근거 항목들을 따로따로 나열하지 말고 하나의 이야기처럼 엮으세요. 화면에는 segment 하나가
+카드 하나로 표시되므로, 관련된 내용은 여러 segment로 잘게 쪼개지 말고 하나의 segment 안에
+자연스러운 문단으로 녹이세요.
+전체 흐름은 대략 3~5개 segment 를 기준으로 삼으세요 (근거가 부족하면 더 적어도 됩니다):
+  1) raw_data: 현재 상태 + 다음 달 예측
+  2) shap: 예측에_영향을_준_요인들을 원인으로 묶어 설명
+  3) raw_data: 향후_3개월_전망을 반영해 이대로면 어떻게 되는지
+  4) hazard: 위험_전환_전망이 있으면, 언제쯤 위험 단계로 넘어갈 가능성이 있는지 (확률은 확정이
+     아니라 '현재 패턴이 유지될 경우의 추정'임을 분명히)
+  5) simulation: 상환_시뮬레이션_결과가 있으면, 그걸 반영한 행동 제안
+segment를 과도하게 쪼개지 마세요. 각 segment는 아래 source 규칙에서 벗어나지 않는 범위에서만
+작성하세요 (근거 없는 내용·숫자를 지어내지 마세요).
+'summary' 필드에는 카드 상단에 쓸 한 줄 요약을 넣으세요 (겁주지 않는 절제된 톤).
 
 문체 지침 (중요 — 이걸 지키지 않으면 형식만 맞고 품질은 실패한 것입니다):
 - 입력값은 이미 사람이 읽을 수 있는 한국어 라벨과 형식(%, 원 단위 등)으로 정리되어 있습니다.
@@ -298,13 +354,18 @@ segment를 만들지 마세요. 각 segment는 반드시 아래 source 규칙에
 
 반드시 지켜야 할 규칙:
 1. 출력은 아래 JSON 스키마를 따르는 JSON 객체 하나만 반환하세요. 다른 설명, 마크다운 코드펜스 없이 순수 JSON만 출력합니다.
-   {"segments": [{"text": "문장", "source": "raw_data|shap|simulation"}]}
+   {"summary": "한 줄 요약", "segments": [{"text": "문장", "source": "raw_data|shap|hazard|simulation"}]}
 2. 각 segment의 source는 그 문장이 실제로 어떤 근거에서 나온 내용인지와 정확히 일치해야 합니다.
    실측_데이터·현재_상태·향후_3개월_전망을 인용·설명한 문장은 raw_data, 예측에_영향을_준_요인을
-   설명한 문장은 shap, 상환_시뮬레이션_결과를 설명한 문장은 simulation으로 태깅하세요.
-3. 입력에 상환_시뮬레이션_결과가 없으면 simulation을 근거로 하는 문장을 만들지 마세요.
-4. "신용점수", "신용등급", "위험도 O점" 같은 표현은 쓰지 말고, 관찰/주의/경고/심화 4단계 용어만 사용하세요.
-5. 특정 대출·카드 상품을 추천하지 마세요. 상환 행동에 대한 코칭에만 집중하세요.
+   설명한 문장은 shap, 위험_전환_전망(전환확률·예상 전환 시점)을 설명한 문장은 hazard,
+   상환_시뮬레이션_결과를 설명한 문장은 simulation으로 태깅하세요.
+3. 입력에 상환_시뮬레이션_결과가 없으면 simulation을, 위험_전환_전망이 없으면 hazard를 근거로
+   하는 문장을 만들지 마세요. allowed_sources 에 없는 source 는 절대 쓰지 마세요.
+4. "신용점수", "신용등급", "신용평가" 같은 표현은 쓰지 말고, 관찰/주의/경고/심화 4단계 용어만 사용하세요.
+5. 특정 대출·카드 상품을 추천하지 마세요. "반드시 월 XX원을 상환하세요" 같은 단정적 지시도
+   쓰지 마세요 — "입력한 가정에 따른 시뮬레이션 결과"라는 구조를 유지하세요.
+6. 전환확률·전환 시점은 확정이 아니라 '현재 패턴이 유지될 경우의 추정'입니다. "~할 가능성이
+   있어요", "~로 계산돼요" 처럼 표현하고 "반드시", "확실히" 는 쓰지 마세요.
 
 스타일 참고용 예시 (실제 출력에 이 예시 자체를 포함하지 마세요):
 입력 예: {"위험_단계": "경고", "실측_데이터": {"결제여유(약정결제비율이 최소결제비율보다 얼마나 여유있는지)": "3.0%p"}}
@@ -385,11 +446,22 @@ def real_generate_coaching_message(context: dict) -> dict:
             "적용_후_위험_단계": sim.get("new_risk_indicator"),
         }
 
+    hazard_kr = None
+    hz = context.get("hazard")
+    if hz and hz.get("applicable") and hz.get("transition_probability_3m") is not None:
+        mtw = hz.get("median_time_to_warning")
+        hazard_kr = {
+            "향후_3개월_경고전환_확률": _pct(hz["transition_probability_3m"]),
+            "예상_전환_시점": (f"약 {mtw}개월 후" if mtw else "관측 기간(약 12개월) 내에는 낮음"),
+            "주의": "이 값은 별도의 이산시간 위험모형이 '현재 패턴이 유지될 경우'로 계산한 추정치입니다.",
+        }
+
     user_payload = {
         "위험_단계": context.get("risk_indicator"),
         "실측_데이터": raw_data_kr,
         "향후_3개월_전망": outlook_kr,
         "예측에_영향을_준_요인": shap_kr,
+        "위험_전환_전망": hazard_kr,
         "상환_시뮬레이션_결과": simulation_kr,
         "allowed_sources": sorted(available_sources),
     }

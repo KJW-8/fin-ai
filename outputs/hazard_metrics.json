@@ -1,0 +1,253 @@
+{
+  "model": "discrete_time_hazard_logistic_regression",
+  "target_event": "risk_indicator 가 처음으로 '경고' 또는 '심화'로 전환",
+  "leakage_controls": [
+    "person-period 행의 feature 는 직전 달(t-1) 관측값 (leakage 방지 — risk_indicator_t 는 carryover_share_t 등으로부터 규칙 도출되므로 같은 달 feature 사용 시 순환).",
+    "모든 계좌가 month 1 에 '관찰'로 시작 -> 첫 전환 가능 period 는 2.",
+    "이벤트 발생 계좌는 첫 전환 시점 이후 위험집합에서 제외(single-event).",
+    "3개월 델타/기울기 초기 결측은 0(변화 정보 없음)으로 대치."
+  ],
+  "duration_spec_selected": "quadratic",
+  "duration_spec_comparison": {
+    "quadratic": {
+      "person_period_brier_test": 0.03242,
+      "temporal_3m_c_index": 0.5829,
+      "mean_state_hazard_curve_t2_12": [
+        0.003,
+        0.009,
+        0.024,
+        0.046,
+        0.067,
+        0.073,
+        0.061,
+        0.039,
+        0.018,
+        0.007,
+        0.002
+      ]
+    },
+    "dummies": {
+      "person_period_brier_test": 0.03422,
+      "temporal_3m_c_index": 0.5821,
+      "mean_state_hazard_curve_t2_12": [
+        0.0,
+        0.013,
+        0.074,
+        0.062,
+        0.032,
+        0.025,
+        0.015,
+        0.006,
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  },
+  "features": [
+    "carryover_share",
+    "carryover_share_delta_3m",
+    "carryover_share_slope_3m",
+    "committed_ratio_delta_3m",
+    "payment_ratio_gap",
+    "revolving_streak_months",
+    "minimum_payment_streak",
+    "delinquency_count_6m",
+    "limit_utilization_ratio",
+    "billing_amount",
+    "committed_payment_ratio",
+    "elapsed_month",
+    "elapsed_month_sq"
+  ],
+  "person_period": {
+    "n_accounts_total": 800,
+    "n_already_high_risk_excluded": 0,
+    "already_high_risk_ids_sample": [],
+    "n_accounts_used": 800,
+    "n_person_period_rows": 4806,
+    "n_events_total": 564,
+    "n_censored": 236,
+    "first_event_month_counts": {
+      "3": 208,
+      "4": 74,
+      "5": 105,
+      "6": 64,
+      "7": 47,
+      "8": 25,
+      "9": 14,
+      "10": 13,
+      "11": 8,
+      "12": 6
+    }
+  },
+  "temporal_split": {
+    "rule": "period <= 9 -> train, period in [10,11,12] -> test (XGBoost와 동일)",
+    "train_rows": 4051,
+    "train_events": 537,
+    "test_rows": 755,
+    "test_events": 27,
+    "small_sample_warning": true,
+    "small_sample_note": "시간분할 test 전환 이벤트 27건 (<30). 이 분할 기반 C-index/calibration 은 신뢰구간이 넓으므로, 계좌 5-fold CV(이벤트 564건 전체 사용)를 주 지표로 함께 본다.",
+    "three_month_transition_eval": {
+      "from_period": 10,
+      "n_accounts_at_risk": 263,
+      "n_transitioned_within_3m": 27,
+      "c_index": 0.5829,
+      "c_index_pairs": 6372,
+      "brier": 0.08233,
+      "calibration": [
+        {
+          "n": 66,
+          "mean_predicted": 0.010261393165413716,
+          "observed_rate": 0.12121212121212122
+        },
+        {
+          "n": 66,
+          "mean_predicted": 0.02228304292155684,
+          "observed_rate": 0.07575757575757576
+        },
+        {
+          "n": 66,
+          "mean_predicted": 0.0368182920376075,
+          "observed_rate": 0.06060606060606061
+        },
+        {
+          "n": 65,
+          "mean_predicted": 0.10531928635156901,
+          "observed_rate": 0.15384615384615385
+        }
+      ],
+      "mean_predicted": 0.0434,
+      "observed_rate": 0.1027
+    }
+  },
+  "account_5fold_cv": {
+    "n_splits": 5,
+    "person_period_brier_mean": 0.04099,
+    "person_period_concordance_mean": 0.9302,
+    "account_3m_c_index_folds": [
+      0.9178,
+      0.9169,
+      0.9618,
+      0.9406,
+      0.9174
+    ],
+    "account_3m_c_index_mean": 0.9309,
+    "account_3m_c_index_std": 0.0179,
+    "account_3m_brier_pooled": 0.14255,
+    "account_3m_calibration_pooled": [
+      {
+        "n": 160,
+        "mean_predicted": 0.0034161764986214,
+        "observed_rate": 0.04375
+      },
+      {
+        "n": 160,
+        "mean_predicted": 0.006115216267140772,
+        "observed_rate": 0.0875
+      },
+      {
+        "n": 160,
+        "mean_predicted": 0.009294217023329955,
+        "observed_rate": 0.1625
+      },
+      {
+        "n": 160,
+        "mean_predicted": 0.17303520272118816,
+        "observed_rate": 0.46875
+      },
+      {
+        "n": 160,
+        "mean_predicted": 0.6050654473374442,
+        "observed_rate": 1.0
+      }
+    ],
+    "account_3m_mean_predicted": 0.1594,
+    "account_3m_observed_rate": 0.3525,
+    "total_accounts_scored": 800
+  },
+  "kaplan_meier_baseline": {
+    "1": 1.0,
+    "2": 1.0,
+    "3": 0.74,
+    "4": 0.6475,
+    "5": 0.5162,
+    "6": 0.4362,
+    "7": 0.3775,
+    "8": 0.3463,
+    "9": 0.3287,
+    "10": 0.3125,
+    "11": 0.3025,
+    "12": 0.295
+  },
+  "c_index_vs_baseline": {
+    "baseline_km_c_index": 0.5,
+    "hazard_model_account_3m_c_index_cv": 0.9309,
+    "relative_improvement_pct_over_baseline": 86.2,
+    "note": "KM baseline 은 개인화가 없어 C-index 정의상 0.5. 개선율 = (모델 C-index - 0.5)/0.5."
+  },
+  "risk_group_event_rates_hazard_quintile": [
+    {
+      "hazard_quintile": 1,
+      "n": 962,
+      "mean_predicted_hazard": 0.0012,
+      "observed_event_rate": 0.001
+    },
+    {
+      "hazard_quintile": 2,
+      "n": 961,
+      "mean_predicted_hazard": 0.0073,
+      "observed_event_rate": 0.0166
+    },
+    {
+      "hazard_quintile": 3,
+      "n": 961,
+      "mean_predicted_hazard": 0.0216,
+      "observed_event_rate": 0.0302
+    },
+    {
+      "hazard_quintile": 4,
+      "n": 961,
+      "mean_predicted_hazard": 0.0526,
+      "observed_event_rate": 0.0375
+    },
+    {
+      "hazard_quintile": 5,
+      "n": 961,
+      "mean_predicted_hazard": 0.5043,
+      "observed_event_rate": 0.5016
+    }
+  ],
+  "examples_transition_probability": [
+    {
+      "account_id": "00bcb114-e045-404d-a5b4-d23fcc068de6",
+      "transition_probability_3m": 0.158,
+      "median_time_to_warning_months": null
+    },
+    {
+      "account_id": "013f9a64-580c-4370-b9c1-14ce528706d9",
+      "transition_probability_3m": 0.199,
+      "median_time_to_warning_months": null
+    },
+    {
+      "account_id": "019d6958-97bb-4672-b7a1-db12decb73d7",
+      "transition_probability_3m": 0.2,
+      "median_time_to_warning_months": null
+    },
+    {
+      "account_id": "03925911-e96e-4e35-8487-8acb97cdce6f",
+      "transition_probability_3m": 0.156,
+      "median_time_to_warning_months": null
+    }
+  ],
+  "calibration_caveat": {
+    "hazard_level": "예측 hazard 5분위별 실제 이벤트율이 거의 일치(Q1 .001/.001 ... Q5 .504/.502). person-period brier 0.04 (naive 0.10 대비 양호). hazard 자체는 잘 보정됨.",
+    "three_month_transition_probability": "'향후 3개월 전환확률'은 feature 를 고정하고 duration 만 전진시켜 계산하므로, 제한된 초기 이력에서 투영하면 실제 전환율을 과소추정한다 (계좌 5-fold CV pooled: 평균 예측 0.1594 vs 실제 0.3525). 순위(누가 더 위험한가)는 유지된다(C-index 0.9309 CV / 0.5829 temporal). → 서비스에서는 확정 확률이 아닌 '현재 패턴 유지 가정 하의 방향성 추정'으로 표기하고, median_time_to_warning(순서형, 더 robust)를 함께 노출한다."
+  },
+  "known_limitations": [
+    "합성데이터: month 3 에 전환 이벤트가 크게 몰림(minimum_payment_streak>=3 이 월 3 부터 성립 가능). 가입 초기(1~3개월) 사용자의 단기 전환확률은 과소추정될 수 있다.",
+    "right-censored 236계좌는 관측 12개월 내 미전환일 뿐, 이후 전환 여부는 알 수 없다.",
+    "시간분할 test 전환 이벤트 27건(<30) — 이 분할 지표는 신뢰구간이 넓다.",
+    "이벤트 정의가 규칙 기반 risk_indicator 전환이므로, hazard 모델은 '규칙이 켜지는 조건에 언제 도달하는가'를 학습한다. 실서비스에서는 실제 연체/부실 라벨로 재정의·재학습 필요."
+  ]
+}

@@ -8,6 +8,9 @@ __pycache__/
 # OS
 .DS_Store
 
+# 로컬 에디터/도구 설정 (배포 무관)
+.claude/
+
 # Streamlit secrets — API 키가 들어갈 수 있으므로 절대 커밋 금지
 # (배포 시에는 Streamlit Cloud 대시보드의 Secrets에 직접 입력한다)
 .streamlit/secrets.toml

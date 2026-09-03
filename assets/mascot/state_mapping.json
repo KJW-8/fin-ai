@@ -1,0 +1,49 @@
+{
+  "_comment": [
+    "risk_indicator(또는 그에 준하는 상태) -> 마스코트 이미지 파일 매핑 + 화면 곳곳에 쓰는 표정/몸짓 accent 매핑.",
+    "코드는 이 파일만 읽는다. 파일명의 의미를 스스로 추측하지 않는다.",
+    "states: assets/mascot/all_elements/ 상단 행(row1_col1~row1_col5)을 무드보드 라벨",
+    "        (왼쪽부터 안정/관찰/주의/경고/심화) 순서에 대응시킨 '추정' 후보.",
+    "accents: row2(표정)/row3(활용 아이콘) 크롭을 화면 섹션별 의미에 붙인 것. 실제 파일을",
+    "         열어보고 표정/소품이 맞는지 확인 후 자유롭게 교체할 것.",
+    "*** 사용자 확인 필요: 각 파일을 열어 최종 확인/수정 ***"
+  ],
+  "base_dir": "all_elements",
+  "states": {
+    "안정": "row1_col1.png",
+    "관찰": "row1_col2.png",
+    "주의": "row1_col3.png",
+    "경고": "row1_col4.png",
+    "심화": "row1_col5.png"
+  },
+  "accents": {
+    "greeting": "row2_col8.png",
+    "smile": "row2_col1.png",
+    "cheer": "row2_col2.png",
+    "focus": "row2_col3.png",
+    "worry": "row2_col4.png",
+    "surprise": "row2_col5.png",
+    "shaky": "row2_col6.png",
+    "steady": "row2_col7.png",
+    "analyze": "row3_col1.png",
+    "report": "row3_col2.png",
+    "strategy": "row3_col3.png",
+    "applaud": "row3_col4.png"
+  },
+  "accent_guess": {
+    "greeting": "row2_col8 = 큰 인사 캐릭터 + '같이 중심을 되찾아봐요!' 말풍선 (사이드바용)",
+    "smile": "row2_col1 = 기본 미소",
+    "cheer": "row2_col2 = 윙크/응원",
+    "focus": "row2_col3 = 집중(진지)",
+    "worry": "row2_col4 = 걱정",
+    "surprise": "row2_col5 = 놀람",
+    "shaky": "row2_col6 = 흔들림(회복 전, 땀+동작선)",
+    "steady": "row2_col7 = 중심 잡음(회복 후, 반짝임)",
+    "analyze": "row3_col1 = 돋보기(분석 중)",
+    "report": "row3_col2 = 클립보드(리포트 확인)",
+    "strategy": "row3_col3 = 계산기+전구(상환 전략)",
+    "applaud": "row3_col4 = 폼폼(응원 포즈)"
+  },
+  "needs_confirmation": true,
+  "confidence_note": "states: 상단 5개가 회전각만 다른 동일 시리즈, 라벨 순서(안정->심화)와 크롭 순서(col1->col5) 일치 추정. accents: 표정/소품은 각 파일 열어 확정 권장."
+}
