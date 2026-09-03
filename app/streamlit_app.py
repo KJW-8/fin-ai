@@ -445,7 +445,7 @@ def render_sidebar(account_master: pd.DataFrame, feature_table: pd.DataFrame, de
             theme.compact_html(
                 f'<div style="display:flex;align-items:center;gap:0.6rem;margin:0.3rem 0 1rem 0;">'
                 f'<div style="flex:1;min-width:0;">'
-                f'<div style="font-size:2rem;font-weight:900;color:{theme.SIDEBAR_TEXT};line-height:1.1;">오뚝이</div>'
+                f'<div class="ottugi-wordmark" style="font-size:2.4rem;color:{theme.SIDEBAR_TEXT};line-height:1.05;">오뚝이</div>'
                 f'<div style="font-size:0.82rem;color:{theme.SIDEBAR_TEXT_MUTED};font-weight:500;line-height:1.45;margin-top:4px;">'
                 f'당신의 리밸런싱도,<br>쓰러져도 스스로 중심을 되찾는 오뚝이처럼</div></div>'
                 f'<div style="flex-shrink:0;">{_g}</div></div>'
@@ -557,18 +557,25 @@ def render_home(bundle: dict, outlook: list[dict]):
     st.markdown(theme.section_header("안녕하세요, 고객님.", "지금 내 리볼빙 상태를 한눈에 확인해보세요.").strip(), unsafe_allow_html=True)
 
     # ① 지금 나는 어떤 상태인가 — 오뚝이 마스코트 + 회복 게이지
+    # 두 카드를 하나의 flex row로 묶어(align-items:stretch) 고객·상태와 무관하게 항상
+    # 같은 높이가 되고 상/하단 가로선이 정렬되도록 한다. 텍스트가 길어지면 두 카드가
+    # 함께 늘어난다.
     hzb = bundle.get("hazard")
     rscore = bundle.get("recovery_score", 50.0)
-    mc1, mc2 = st.columns([1, 1])
-    with mc1:
-        mascot.render(bundle["current_risk"], recovery_score=rscore, size_px=72, key="home",
-                      pad="0.85rem 1.1rem")
-    with mc2:
-        hint = rec.recovery_hint(
-            bundle["current_risk"],
-            transition_probability_3m=(hzb.get("transition_probability_3m") if hzb else None),
-        )
-        st.markdown(theme.recovery_gauge_html(rscore, hint=hint), unsafe_allow_html=True)
+    hint = rec.recovery_hint(
+        bundle["current_risk"],
+        transition_probability_3m=(hzb.get("transition_probability_3m") if hzb else None),
+    )
+    st.markdown(
+        theme.compact_html(
+            '<div style="display:flex;gap:0.9rem;align-items:stretch;flex-wrap:wrap;margin:0.2rem 0 0.6rem 0;">'
+            + mascot.card_html(bundle["current_risk"], recovery_score=rscore, size_px=100,
+                               key="home", pad="1rem 1.2rem", fill_height=True)
+            + theme.recovery_gauge_html(rscore, hint=hint, fill_height=True)
+            + "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
 
     sub_metrics = theme.metric_row(
         [
@@ -660,7 +667,7 @@ def render_home(bundle: dict, outlook: list[dict]):
 def render_risk(bundle: dict):
     def _risk_tile(label: str, state: str) -> str:
         c = theme.RISK_COLORS.get(state, theme.RISK_COLORS["관찰"])["main"]
-        img = mascot.state_img(state, size_px=52)
+        img = mascot.state_img(state, size_px=74)
         return (
             f'<div style="flex:1;min-width:150px;background:{theme.SURFACE};border:1px solid {theme.LINE};'
             f'border-radius:14px;padding:1rem 1.2rem;">'
@@ -1014,7 +1021,7 @@ def render_simulator(bundle: dict, anchor_row, monthly_transaction, derived_feat
     _dscore = _sim_recovery - bundle.get("predicted_recovery_score", _sim_recovery)
     _mc1, _mc2 = st.columns([1, 2])
     with _mc1:
-        mascot.render(new_risk, recovery_score=_sim_recovery, size_px=120, key="sim",
+        mascot.render(new_risk, recovery_score=_sim_recovery, size_px=170, key="sim",
                       caption=("시나리오를 적용하면 오뚝이 상태가 이렇게 바뀌는 것으로 계산돼요."
                                if extra_payment > 0 else None))
     with _mc2:

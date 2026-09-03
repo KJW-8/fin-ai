@@ -70,6 +70,13 @@ SIDEBAR_LINE = "rgba(15,76,76,0.13)"
 SIDEBAR_SELECTED_BG = BRAND       # 선택 탭 = 딥 티얼
 SIDEBAR_SELECTED_TEXT = "#ffffff"
 
+# 브랜드 워드마크("오뚝이") 전용 서체. 마스코트 로고(assets/mascot/all_elements/label_08.png
+# = "뚜기")의 두툼한 라운드 고딕 손글씨 느낌에 가장 근접한 무료 웹폰트로 Google Fonts의
+# 'Black Han Sans'(검은고딕)를 쓴다. 손으로 다듬은 로고라 완전히 같지는 않지만 무게감·형태가
+# 비슷하다. 폰트 로딩 실패 시 시스템 고딕으로 폴백한다. 단일 웨이트(400)이므로 font-weight는
+# 지정하지 않는다.
+LOGO_FONT = '"Black Han Sans", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif'
+
 
 def compact_html(html: str) -> str:
     """Streamlit의 st.markdown(unsafe_allow_html=True)은 내부적으로 CommonMark 파서를
@@ -84,9 +91,15 @@ def inject_global_css() -> None:
     st.markdown(
         f"""
         <style>
+        @import url('https://fonts.googleapis.com/css2?family=Black+Han+Sans&display=swap');
         html, body, [class*="css"] {{
             font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
                 "Malgun Gothic", "Segoe UI", sans-serif;
+        }}
+        /* 브랜드 워드마크("오뚝이") — 마스코트 로고 서체에 근접한 라운드 고딕 */
+        .ottugi-wordmark {{
+            font-family: {LOGO_FONT};
+            letter-spacing: 0.03em;
         }}
         .stApp {{
             background: {PAGE_BG};
@@ -279,7 +292,7 @@ def page_header(title: str, subtitle: str, right_html: str = "") -> str:
                 padding:0.9rem 1.3rem;background:{SURFACE};border:1px solid {LINE};
                 border-radius:16px;margin-bottom:1.4rem;">
         <div>
-            <div style="font-size:1.35rem;font-weight:800;color:{BRAND};letter-spacing:-0.01em;">
+            <div class="ottugi-wordmark" style="font-size:1.6rem;color:{BRAND};">
                 오뚝이
             </div>
             <div style="font-size:0.85rem;color:{SUBTLE};margin-top:2px;">{subtitle}</div>
@@ -422,9 +435,10 @@ def recovery_gauge_html(score: float, *, hint: str = "", delta: float | None = N
         dcol = RISK_COLORS["관찰"]["main"] if delta > 0 else RISK_COLORS["경고"]["main"]
         delta_html = f'<span style="color:{dcol};font-size:0.9rem;font-weight:800;margin-left:8px;">{arrow} {abs(delta):.0f}</span>'
     hint_html = f'<div style="color:{SUBTLE};font-size:0.85rem;margin-top:0.5rem;line-height:1.45;">{hint}</div>' if hint else ""
-    h = "height:100%;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;" if fill_height else ""
+    h = ("box-sizing:border-box;flex:1 1 300px;align-self:stretch;display:flex;flex-direction:column;"
+         "justify-content:center;margin:0;") if fill_height else "margin:0.6rem 0;"
     return compact_html(f"""
-    <div style="background:{SURFACE};border:1px solid {LINE};border-radius:16px;padding:0.95rem 1.2rem;margin:0.6rem 0;{h}">
+    <div style="background:{SURFACE};border:1px solid {LINE};border-radius:16px;padding:0.95rem 1.2rem;{h}">
         <div style="display:flex;align-items:baseline;justify-content:space-between;">
             <div style="color:{SUBTLE};font-size:0.85rem;font-weight:700;">오뚝이 회복 게이지</div>
             <div><span style="color:{c};font-size:1.8rem;font-weight:900;">{score:.0f}</span>

@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import base64
 import json
+import math
+import struct
 from pathlib import Path
 
 import streamlit as st
@@ -60,6 +62,36 @@ def _img_data_uri(path_str: str) -> str | None:
     return f"data:image/png;base64,{b64}"
 
 
+@st.cache_data
+def _png_size(path_str: str) -> tuple[int, int] | None:
+    """PNG 원본 픽셀 크기 (IHDR 파싱, Pillow 불필요)."""
+    p = Path(path_str)
+    if not p.exists():
+        return None
+    with open(p, "rb") as f:
+        head = f.read(24)
+    if len(head) < 24 or head[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    w, h = struct.unpack(">II", head[16:24])
+    return int(w), int(h)
+
+
+# 상태 이미지(row1_col1~5)는 '같은 오뚝이'를 회전각만 다르게 그린 크롭이라 원본 종횡비가
+# 제각각이다('심화'는 거의 눕는 각도라 가로로 넓다). width 또는 height 한쪽만 고정하면
+# 각도에 따라 캐릭터가 커지거나 작아 보인다. 5개 크롭의 content 픽셀 면적은 거의 같으므로
+# (manifest.json 확인) '렌더 면적'을 일정하게 맞춰 어느 상태에서도 같은 크기로 보이게 한다.
+_MASCOT_NOMINAL_ASPECT = 0.70  # 똑바로 선 오뚝이 크롭의 폭/높이 근사
+
+
+def _sized_img_dims(w: int | None, h: int | None, target_px: int) -> tuple[int, int]:
+    """target_px 를 '똑바로 선 오뚝이의 높이'로 보고, 렌더 면적이 일정하도록 (w,h) 산출."""
+    if not w or not h:
+        return target_px, target_px
+    target_area = (target_px * target_px) * _MASCOT_NOMINAL_ASPECT
+    scale = math.sqrt(target_area / (w * h))
+    return max(1, round(w * scale)), max(1, round(h * scale))
+
+
 def resolve_state(risk_indicator: str, recovery_score: float | None = None) -> str:
     """표시할 상태 키. '관찰'이면서 recovery_score 가 매우 높으면 '안정'으로 승격."""
     if risk_indicator == "관찰" and recovery_score is not None and recovery_score >= STABLE_RECOVERY_CUTOFF:
@@ -67,20 +99,80 @@ def resolve_state(risk_indicator: str, recovery_score: float | None = None) -> s
     return risk_indicator if risk_indicator in _FALLBACK_ORDER else "관찰"
 
 
-def image_uri_for_state(state: str) -> str | None:
+def _resolve_state_image(state: str) -> tuple[str, str] | tuple[None, None]:
+    """(data URI, 파일 경로 문자열). 요청 상태가 없으면 fallback 순서로 가장 가까운 상태."""
     mp = _load_mapping()
     states = mp.get("states", {})
     base_dir = MASCOT_DIR / mp.get("base_dir", "all_elements")
-    # 요청 상태 -> 없으면 fallback 순서상 가장 가까운(덜 심각한) 상태로
     order = _FALLBACK_ORDER
     start = order.index(state) if state in order else 1
     for k in [state] + order[start::-1] + order[start:]:
         fname = states.get(k)
         if fname:
-            uri = _img_data_uri(str(base_dir / fname))
+            path_str = str(base_dir / fname)
+            uri = _img_data_uri(path_str)
             if uri:
-                return uri
-    return None
+                return uri, path_str
+    return None, None
+
+
+def image_uri_for_state(state: str) -> str | None:
+    return _resolve_state_image(state)[0]
+
+
+def card_html(
+    risk_indicator: str,
+    *,
+    recovery_score: float | None = None,
+    caption: str | None = None,
+    size_px: int = 150,
+    key: str = "main",
+    fill_height: bool = False,
+    pad: str = "1.1rem 1.3rem",
+) -> str:
+    """마스코트 이미지 + 상태 문구 카드 HTML 문자열. risk_indicator 변경 시 페이드 전환.
+
+    - 마스코트는 상태(회전각)와 무관하게 항상 같은 크기로 보이도록 렌더 면적을 정규화하고,
+      항상 같은 폭(size_px)의 슬롯 안에 중앙 배치해 옆 텍스트의 시작 위치가 고정되게 한다.
+    - fill_height=True: 카드가 부모 flex row 높이를 꽉 채우도록 -> 옆 카드와 상/하단 정렬.
+    """
+    state = resolve_state(risk_indicator, recovery_score)
+    uri, path_str = _resolve_state_image(state)
+    msg = caption or STATE_MESSAGES.get(state, STATE_MESSAGES["관찰"])
+    color = theme.RISK_COLORS.get(risk_indicator, theme.RISK_COLORS["관찰"])
+
+    if uri:
+        w0, h0 = (_png_size(path_str) or (None, None)) if path_str else (None, None)
+        rw, rh = _sized_img_dims(w0, h0, size_px)
+        img_html = (
+            f'<img src="{uri}" alt="오뚝이 {state}" '
+            f'style="width:{rw}px;height:{rh}px;display:block;'
+            f'animation:ottugi-fade-{state}-{key} 0.5s ease;" />'
+            f'<style>@keyframes ottugi-fade-{state}-{key}'
+            f'{{from{{opacity:0;transform:translateY(6px);}}to{{opacity:1;transform:translateY(0);}}}}</style>'
+        )
+    else:
+        img_html = (
+            f'<div style="width:{int(size_px * _MASCOT_NOMINAL_ASPECT)}px;height:{size_px}px;border-radius:16px;'
+            f'background:{color["bg"]};border:2px solid {color["border"]};display:flex;'
+            f'align-items:center;justify-content:center;font-size:2rem;">🪆</div>'
+        )
+
+    # fill_height: 바깥 flex row(align-items:stretch) 안에서 옆 카드와 높이를 맞춘다.
+    # height:100% 는 부모 높이가 '내용에 의해 결정'되면 auto 로 풀리므로 쓰지 않고,
+    # flex item 의 기본 align-self:stretch 에만 의존한다.
+    h = "box-sizing:border-box;flex:1 1 300px;align-self:stretch;" if fill_height else ""
+    return theme.compact_html(f"""
+        <div style="display:flex;gap:0.9rem;align-items:center;flex-wrap:wrap;{h}
+                    background:{theme.SURFACE};border:1px solid {theme.LINE};
+                    border-left:5px solid {color["main"]};border-radius:16px;padding:{pad};">
+            <div style="flex-shrink:0;width:{size_px}px;display:flex;align-items:center;justify-content:center;">{img_html}</div>
+            <div style="flex:1;min-width:150px;">
+                <div style="font-weight:900;font-size:1.1rem;color:{color["main"]};">{state}</div>
+                <div style="color:{theme.INK};font-size:0.9rem;margin-top:3px;line-height:1.45;">{msg}</div>
+            </div>
+        </div>
+        """)
 
 
 def render(
@@ -93,43 +185,17 @@ def render(
     fill_height: bool = False,
     pad: str = "1.1rem 1.3rem",
 ) -> None:
-    """마스코트 이미지 + 상태 문구. risk_indicator 변경 시 페이드 전환.
-
-    fill_height=True: 카드가 부모(st.columns) 높이를 꽉 채우도록 -> 옆 카드와 높이 정렬.
-    """
-    state = resolve_state(risk_indicator, recovery_score)
-    uri = image_uri_for_state(state)
-    msg = caption or STATE_MESSAGES.get(state, STATE_MESSAGES["관찰"])
-    color = theme.RISK_COLORS.get(risk_indicator, theme.RISK_COLORS["관찰"])
-
-    if uri:
-        img_html = (
-            f'<img src="{uri}" alt="오뚝이 {state}" '
-            f'style="width:{size_px}px;height:auto;display:block;'
-            f'animation:ottugi-fade-{state}-{key} 0.5s ease;" />'
-            f'<style>@keyframes ottugi-fade-{state}-{key}'
-            f'{{from{{opacity:0;transform:translateY(6px);}}to{{opacity:1;transform:translateY(0);}}}}</style>'
-        )
-    else:
-        img_html = (
-            f'<div style="width:{size_px}px;height:{size_px}px;border-radius:16px;'
-            f'background:{color["bg"]};border:2px solid {color["border"]};display:flex;'
-            f'align-items:center;justify-content:center;font-size:2rem;">🪆</div>'
-        )
-
-    h = "height:100%;box-sizing:border-box;" if fill_height else ""
+    """card_html() 를 그대로 렌더한다 (하위 호환용 얇은 래퍼)."""
     st.markdown(
-        theme.compact_html(f"""
-        <div style="display:flex;gap:0.9rem;align-items:center;flex-wrap:wrap;{h}
-                    background:{theme.SURFACE};border:1px solid {theme.LINE};
-                    border-left:5px solid {color["main"]};border-radius:16px;padding:{pad};">
-            <div style="flex-shrink:0;">{img_html}</div>
-            <div style="flex:1;min-width:150px;">
-                <div style="font-weight:900;font-size:1.1rem;color:{color["main"]};">{state}</div>
-                <div style="color:{theme.INK};font-size:0.9rem;margin-top:3px;line-height:1.45;">{msg}</div>
-            </div>
-        </div>
-        """),
+        card_html(
+            risk_indicator,
+            recovery_score=recovery_score,
+            caption=caption,
+            size_px=size_px,
+            key=key,
+            fill_height=fill_height,
+            pad=pad,
+        ),
         unsafe_allow_html=True,
     )
 
@@ -166,11 +232,13 @@ def render_accent(key: str, *, size_px: int = 64) -> None:
 def state_img(risk_indicator: str, *, size_px: int = 44, recovery_score: float | None = None) -> str:
     """risk_indicator 에 대응하는 상태 캐릭터(회전각 다른 row1 png) <img> HTML. 없으면 "".
     라벨과 값 사이에 끼워 넣는 용도."""
-    uri = image_uri_for_state(resolve_state(risk_indicator, recovery_score))
+    uri, path_str = _resolve_state_image(resolve_state(risk_indicator, recovery_score))
     if not uri:
         return ""
+    w0, h0 = (_png_size(path_str) or (None, None)) if path_str else (None, None)
+    rw, rh = _sized_img_dims(w0, h0, size_px)
     return (f'<img src="{uri}" alt="오뚝이 {risk_indicator}" '
-            f'style="width:{size_px}px;height:auto;display:inline-block;vertical-align:middle;flex-shrink:0;" />')
+            f'style="width:{rw}px;height:{rh}px;display:inline-block;vertical-align:middle;flex-shrink:0;" />')
 
 
 def section_with_accent(title: str, desc: str = "", *, accent_key: str = "", size_px: int = 52) -> None:
