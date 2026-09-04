@@ -727,22 +727,23 @@ def render_risk(bundle: dict):
                 f'<div style="color:{theme.SUBTLE};font-size:0.83rem;line-height:1.5;margin-top:2px;">{expl}</div>'
                 f'</div>'
             )
+        # 좌우 설명 블록 높이를 고정한다 -> 차트 높이는 동일하므로 두 박스도 같은 높이가
+        # 된다. (SHAP 차트는 이 블록 밖에 있으므로 차트 렌더링에는 영향 없음)
         return theme.compact_html(
             f'<div style="background:{theme.PAGE_BG};border:1px solid {theme.LINE};border-radius:10px;'
-            f'padding:0.15rem 0.9rem 0.55rem;margin-top:0.7rem;">'
+            f'padding:0.15rem 0.9rem 0.55rem;margin-top:0.7rem;height:340px;overflow:auto;box-sizing:border-box;">'
             f'<div style="font-size:0.72rem;font-weight:800;color:{theme.SUBTLE};letter-spacing:0.03em;'
             f'padding:0.6rem 0 0.15rem;">이 요인들이 왜 영향을 주나요?</div>'
             + "".join(rows) + "</div>"
         )
 
     def shap_section(shap_dict: dict, title: str, k: int = 5):
-        # 두 박스 높이를 고정해 좌우 정렬을 맞춘다(차트 높이는 동일, 설명 글자 수만 달라서
-        # 예전엔 박스 높이가 어긋났음).
-        with st.container(border=True, height=700):
+        with st.container(border=True):
             st.markdown(
                 f'<div style="font-weight:800;color:{theme.INK};font-size:1rem;margin-bottom:0.2rem;">{title}</div>',
                 unsafe_allow_html=True,
             )
+            # SHAP 막대그래프 — 위험 요인별 기여도. 반드시 유지한다.
             st.plotly_chart(charts.shap_bar_chart(shap_dict, FEATURE_LABELS, k=k), width="stretch", config={"displayModeBar": False})
             st.markdown(_factor_explain_block(shap_dict), unsafe_allow_html=True)
 
