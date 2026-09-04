@@ -404,13 +404,20 @@ def alert_card(icon: str, title: str, body: str, tone: str = "경고") -> str:
     """)
 
 
-def metric_tile(label: str, value: str, note: str = "") -> str:
+def metric_tile(label: str, value: str, note: str = "", desc: str = "") -> str:
+    """지표 타일. desc: 라벨과 수치 사이에 들어가는 작은 설명 문구(이 수치가 어떻게
+    계산되는지). note: 수치 아래 보조 문구(기존 용도 유지)."""
     note_html = f'<div style="color:{SUBTLE};font-size:0.78rem;margin-top:4px;">{note}</div>' if note else ""
+    desc_html = (
+        f'<div style="color:{SUBTLE};font-size:0.72rem;line-height:1.45;margin-top:4px;">{desc}</div>'
+        if desc else ""
+    )
     return compact_html(f"""
     <div style="background:{SURFACE};border:1px solid {LINE};border-radius:14px;
                 padding:1rem 1.2rem;flex:1;min-width:150px;">
-        <div style="color:{SUBTLE};font-size:0.82rem;font-weight:600;">{label}</div>
-        <div style="color:{INK};font-size:1.5rem;font-weight:800;margin-top:2px;">{value}</div>
+        <div style="color:{INK};font-size:0.98rem;font-weight:700;letter-spacing:-0.01em;">{label}</div>
+        {desc_html}
+        <div style="color:{INK};font-size:1.5rem;font-weight:800;margin-top:5px;">{value}</div>
         {note_html}
     </div>
     """)

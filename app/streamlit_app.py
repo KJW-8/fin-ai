@@ -577,12 +577,18 @@ def render_home(bundle: dict, outlook: list[dict]):
         unsafe_allow_html=True,
     )
 
+    # 각 지표가 어떻게 계산되는지 설명을 별도 패널로 떼어놓지 않고, 타일 안 라벨과
+    # 수치 사이에 작은 글씨로 넣는다.
     sub_metrics = theme.metric_row(
         [
-            theme.metric_tile("리볼빙 의존도", fmt_pct(bundle["current_carryover_share"])),
-            theme.metric_tile("최근 3개월 변화(의존도)", fmt_pct(bundle["current_delta_3m"], signed=True)),
-            theme.metric_tile("결제여유", fmt_pct(bundle["current_gap"])),
-            theme.metric_tile("연속 최소결제", f"{bundle['current_streak']}개월"),
+            theme.metric_tile("리볼빙 의존도", fmt_pct(bundle["current_carryover_share"]),
+                              desc=METRIC_DEFINITIONS["리볼빙 의존도"]),
+            theme.metric_tile("최근 3개월 변화(의존도)", fmt_pct(bundle["current_delta_3m"], signed=True),
+                              desc=METRIC_DEFINITIONS["최근 3개월 변화(의존도)"]),
+            theme.metric_tile("결제여유", fmt_pct(bundle["current_gap"]),
+                              desc=METRIC_DEFINITIONS["결제여유"]),
+            theme.metric_tile("연속 최소결제", f"{bundle['current_streak']}개월",
+                              desc=METRIC_DEFINITIONS["연속 최소결제"]),
         ]
     )
     st.markdown(
@@ -594,10 +600,6 @@ def render_home(bundle: dict, outlook: list[dict]):
         unsafe_allow_html=True,
     )
     st.markdown(theme.card_open() + theme.risk_stepper_html(bundle["current_risk"]) + theme.card_close(), unsafe_allow_html=True)
-    st.markdown(
-        definitions_for("리볼빙 의존도", "최근 3개월 변화(의존도)", "결제여유", "연속 최소결제"),
-        unsafe_allow_html=True,
-    )
 
     # 조기경보
     escalation = find_first_escalation(outlook, target_level="경고")
