@@ -712,17 +712,39 @@ def render_risk(bundle: dict):
         accent_key="report",
     )
 
+    def _factor_explain_block(shap_dict: dict) -> str:
+        """상위 3개 요인의 '왜 영향을 주는지' 설명을, 느슨한 텍스트가 아니라 한 덩어리
+        블록(라벨 + 설명 목록)으로 묶어서 보여준다."""
+        top_items = sorted(shap_dict.items(), key=lambda kv: abs(kv[1]), reverse=True)[:3]
+        rows = []
+        for i, (feat, _v) in enumerate(top_items):
+            label = FEATURE_LABELS.get(feat, feat)
+            expl = FEATURE_EXPLANATIONS.get(feat, "")
+            sep = "" if i == 0 else f"border-top:1px dashed {theme.LINE};"
+            rows.append(
+                f'<div style="padding:0.55rem 0;{sep}">'
+                f'<div style="font-weight:800;color:{theme.INK};font-size:0.9rem;">{label}</div>'
+                f'<div style="color:{theme.SUBTLE};font-size:0.83rem;line-height:1.5;margin-top:2px;">{expl}</div>'
+                f'</div>'
+            )
+        return theme.compact_html(
+            f'<div style="background:{theme.PAGE_BG};border:1px solid {theme.LINE};border-radius:10px;'
+            f'padding:0.15rem 0.9rem 0.55rem;margin-top:0.7rem;">'
+            f'<div style="font-size:0.72rem;font-weight:800;color:{theme.SUBTLE};letter-spacing:0.03em;'
+            f'padding:0.6rem 0 0.15rem;">이 요인들이 왜 영향을 주나요?</div>'
+            + "".join(rows) + "</div>"
+        )
+
     def shap_section(shap_dict: dict, title: str, k: int = 5):
-        with st.container(border=True):
-            st.markdown(f"<b>{title}</b>", unsafe_allow_html=True)
+        # 두 박스 높이를 고정해 좌우 정렬을 맞춘다(차트 높이는 동일, 설명 글자 수만 달라서
+        # 예전엔 박스 높이가 어긋났음).
+        with st.container(border=True, height=700):
+            st.markdown(
+                f'<div style="font-weight:800;color:{theme.INK};font-size:1rem;margin-bottom:0.2rem;">{title}</div>',
+                unsafe_allow_html=True,
+            )
             st.plotly_chart(charts.shap_bar_chart(shap_dict, FEATURE_LABELS, k=k), width="stretch", config={"displayModeBar": False})
-            top_items = sorted(shap_dict.items(), key=lambda kv: abs(kv[1]), reverse=True)[:3]
-            expl_rows = []
-            for feat, _ in top_items:
-                label = FEATURE_LABELS.get(feat, feat)
-                expl = FEATURE_EXPLANATIONS.get(feat, "")
-                expl_rows.append(f'<div style="margin-top:4px;font-size:0.85rem;"><b>{label}</b> — <span style="color:{theme.SUBTLE};">{expl}</span></div>')
-            st.markdown("".join(expl_rows), unsafe_allow_html=True)
+            st.markdown(_factor_explain_block(shap_dict), unsafe_allow_html=True)
 
     c1, c2 = st.columns(2)
     with c1:
