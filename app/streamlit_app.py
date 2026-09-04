@@ -693,16 +693,16 @@ def render_risk(bundle: dict):
     st.markdown(
         theme.metric_row(
             [
-                theme.metric_tile("리볼빙 의존도", fmt_pct(bundle["current_carryover_share"])),
-                theme.metric_tile("상승 추세", rising, note=fmt_pct(bundle["current_delta_3m"], signed=True)),
-                theme.metric_tile("결제여유", fmt_pct(bundle["current_gap"]), note="약정결제비율 − 최소결제비율"),
-                theme.metric_tile("최소결제 반복", f"{bundle['current_streak']}개월 연속" if bundle["current_streak"] > 0 else "없음"),
+                theme.metric_tile("리볼빙 의존도", fmt_pct(bundle["current_carryover_share"]),
+                                  desc=METRIC_DEFINITIONS["리볼빙 의존도"]),
+                theme.metric_tile("상승 추세", rising, note=fmt_pct(bundle["current_delta_3m"], signed=True),
+                                  desc=METRIC_DEFINITIONS["상승 추세"]),
+                theme.metric_tile("결제여유", fmt_pct(bundle["current_gap"]), note="약정결제비율 − 최소결제비율",
+                                  desc=METRIC_DEFINITIONS["결제여유"]),
+                theme.metric_tile("최소결제 반복", f"{bundle['current_streak']}개월 연속" if bundle["current_streak"] > 0 else "없음",
+                                  desc=METRIC_DEFINITIONS["최소결제 반복"]),
             ]
         ),
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        definitions_for("리볼빙 의존도", "상승 추세", "결제여유", "최소결제 반복"),
         unsafe_allow_html=True,
     )
 
