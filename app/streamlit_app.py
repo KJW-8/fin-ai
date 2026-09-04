@@ -808,25 +808,6 @@ def render_coaching(bundle: dict, anchor_row, monthly_transaction, derived_featu
         unsafe_allow_html=True,
     )
 
-    # 회복 서사: 흔들림 → 중심 잡기 (오뚝이의 핵심 메시지). 마스코트 2컷.
-    _shaky, _steady = mascot.accent("shaky", size_px=76), mascot.accent("steady", size_px=76)
-    if _shaky and _steady:
-        st.markdown(
-            theme.compact_html(f"""
-            <div style="display:flex;gap:1rem;align-items:center;justify-content:center;flex-wrap:wrap;
-                        background:{theme.BRAND_SOFT};border-radius:14px;padding:0.9rem 1.2rem;margin-bottom:1rem;">
-                <div style="text-align:center;">{_shaky}
-                    <div style="font-size:0.78rem;color:{theme.SUBTLE};font-weight:700;margin-top:2px;">지금 (흔들리는 중)</div></div>
-                <div style="color:{theme.SUBTLE};font-size:1.5rem;">→</div>
-                <div style="text-align:center;">{_steady}
-                    <div style="font-size:0.78rem;color:{theme.BRAND};font-weight:800;margin-top:2px;">행동을 바꾸면 (중심 회복)</div></div>
-                <div style="flex:1;min-width:180px;color:{theme.INK};font-size:0.9rem;line-height:1.5;">
-                    아래 코칭과 시뮬레이션에서, 어떤 행동을 가정하면 오뚝이가 다시 중심을 잡는지 확인할 수 있어요.</div>
-            </div>
-            """),
-            unsafe_allow_html=True,
-        )
-
     # --- 최소 개입액을 먼저 계산해서, 사용자가 시뮬레이터를 직접 안 돌려봤어도
     #     "얼마를 더 갚으면 되는지"를 코칭 컨텍스트의 simulation 근거로 자동 포함시킨다.
     #     (사용자가 직접 시뮬레이터를 돌려본 결과가 있으면 그걸 우선한다) ---
