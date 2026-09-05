@@ -29,21 +29,21 @@ RISK_COLORS = {
 RISK_ORDER = {"관찰": 0, "주의": 1, "경고": 2, "심화": 3}
 
 SOURCE_META = {
-    "raw_data": {"label": "실제 입력 데이터", "color": "#2563a8", "icon": "📄"},
-    "shap": {"label": "예측에 영향을 준 요인", "color": "#7a4fb5", "icon": "🔎"},
-    "hazard": {"label": "위험 전환 전망", "color": "#b06a1a", "icon": "⏳"},
+    "raw_data": {"label": "실제 입력 데이터", "color": "#2563a8", "icon": "•"},
+    "shap": {"label": "예측에 영향을 준 요인", "color": "#7a4fb5", "icon": "•"},
+    "hazard": {"label": "위험 전환 전망", "color": "#b06a1a", "icon": "•"},
     # 예전엔 "#1a7f5a"(=RISK_COLORS["관찰"]과 동일한 값)를 썼는데, 브랜드 컬러 정비 과정에서
     # "상태 신호(위험도) 색상"과 "그 외 용도" 색상이 우연히 겹치던 것을 발견해 브랜드
     # 컬러로 바꿔 분리했다.
-    "simulation": {"label": "상환 시뮬레이션 결과", "color": "#0F4C4C", "icon": "🧮"},
+    "simulation": {"label": "상환 시뮬레이션 결과", "color": "#0F4C4C", "icon": "•"},
 }
 
 # AI 코칭 페이지에서 segment(source)별로 큰 섹션 제목을 붙일 때 쓰는 라벨.
 # 같은 source가 여러 개면 호출부에서 뒤에 번호를 붙여 구분한다(예: "위험에 영향을 준 요인 2").
 SOURCE_SECTION_TITLES = {
-    "raw_data": "📊 현재 상황",
-    "shap": "🔎 위험에 영향을 준 요인",
-    "simulation": "🧮 상환 시뮬레이션 결과",
+    "raw_data": "현재 상황",
+    "shap": "위험에 영향을 준 요인",
+    "simulation": "상환 시뮬레이션 결과",
 }
 
 BRAND = "#0F4C4C"        # 딥 티얼(deep teal) — "흔들려도 중심을 되찾는다"는 오뚝이의 회복탄력성
@@ -569,7 +569,7 @@ def forecast_timeline_html(steps: list[dict]) -> str:
         )
         items.append(
             f"""{arrow}
-            <div style="text-align:center;flex:1;min-width:110px;">
+            <div style="text-align:center;flex:1;min-width:140px;">
                 <div style="color:{SUBTLE};font-size:0.88rem;font-weight:700;margin-bottom:10px;">{s['label']}</div>
                 {icon_html}
                 <div style="background:{c['bg']};border:2px solid {c['border']};color:{c['main']};

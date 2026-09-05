@@ -395,7 +395,7 @@ def render_hazard_block(bundle: dict, context: str = "home") -> None:
     if not hzb.get("applicable"):
         st.markdown(
             theme.alert_card(
-                "ℹ️", "이미 경고/심화 단계예요",
+                "▲", "이미 경고/심화 단계예요",
                 "위험 전환 모형은 아직 경고 단계로 넘어가지 않은 분의 '전환 시점'을 예측하는 모형이에요. "
                 "지금은 아래 회복 미션과 상환 시뮬레이션에서 개선 방향을 확인하시는 게 더 도움이 됩니다.",
                 tone="주의",
@@ -614,13 +614,13 @@ def render_home(bundle: dict, outlook: list[dict]):
     current_above_target = theme.RISK_ORDER[bundle["current_risk"]] >= theme.RISK_ORDER["경고"]
     if current_above_target:
         st.markdown(
-            theme.alert_card("🚨", "이미 주의가 필요한 단계입니다", "아래 AI 코칭과 상환 시뮬레이션에서 구체적인 개선 방법을 확인해보세요.", tone=bundle["current_risk"]),
+            theme.alert_card("▲", "이미 주의가 필요한 단계입니다", "아래 AI 코칭과 상환 시뮬레이션에서 구체적인 개선 방법을 확인해보세요.", tone=bundle["current_risk"]),
             unsafe_allow_html=True,
         )
     elif escalation:
         st.markdown(
             theme.alert_card(
-                "⚠️", "조기경보",
+                "▲", "조기경보",
                 f"현재 추세가 유지되면 약 {escalation['month_offset']}개월 후 '경고' 단계로 전환될 것으로 예측됩니다.",
                 tone="경고",
             ),
@@ -628,7 +628,7 @@ def render_home(bundle: dict, outlook: list[dict]):
         )
     else:
         st.markdown(
-            theme.alert_card("✅", "안정적인 흐름", "향후 3개월간 현재 추세가 유지된다면 경고 단계로 전환되지 않을 것으로 예측됩니다.", tone="관찰"),
+            theme.alert_card("●", "안정적인 흐름", "향후 3개월간 현재 추세가 유지된다면 경고 단계로 전환되지 않을 것으로 예측됩니다.", tone="관찰"),
             unsafe_allow_html=True,
         )
 
@@ -636,7 +636,7 @@ def render_home(bundle: dict, outlook: list[dict]):
     # 전부 "왜 이런 상태가 되었는지"를 설명하는 내용이라 위험 분석 탭과 겹친다. 두 탭에
     # 똑같이 두는 대신 위험 분석 탭 하나로 모으고, 여기서는 버튼으로 안내만 한다.
     st.markdown(
-        theme.alert_card("💡", "추천 행동", risk_level_action_text(bundle["predicted_risk"]), tone=bundle["predicted_risk"]),
+        theme.alert_card("▲", "추천 행동", risk_level_action_text(bundle["predicted_risk"]), tone=bundle["predicted_risk"]),
         unsafe_allow_html=True,
     )
 
@@ -821,7 +821,7 @@ def render_coaching(bundle: dict, anchor_row, monthly_transaction, derived_featu
             "label": "현재" if s["month_offset"] == 0 else f"{s['month_offset']}개월 후",
             "level": s["level"],
             "value": fmt_pct(s["carryover_share"]),
-            "icon": mascot.state_img(s["level"], size_px=40),
+            "icon": mascot.state_img(s["level"], size_px=120),
         }
         for s in outlook
     ]
@@ -886,7 +886,7 @@ def render_coaching(bundle: dict, anchor_row, monthly_transaction, derived_featu
 
     if message.get("summary"):
         st.markdown(
-            theme.alert_card("🧭", "한 줄 요약", message["summary"], tone=bundle["predicted_risk"]),
+            theme.alert_card("●", "한 줄 요약", message["summary"], tone=bundle["predicted_risk"]),
             unsafe_allow_html=True,
         )
 
@@ -951,7 +951,7 @@ def render_simulator(bundle: dict, anchor_row, monthly_transaction, derived_feat
             f'<div style="background:{theme.SURFACE};border:1px dashed {_acc_ap}80;border-left:4px solid {_acc_ap};'
             f'border-radius:14px;padding:1.1rem 1.3rem;margin:0.6rem 0;display:flex;gap:0.8rem;align-items:flex-start;">'
             f'{mascot.accent("applaud", size_px=58)}'
-            f'<div><div style="font-weight:900;color:{theme.BRAND};font-size:1.53rem;margin-bottom:0.4rem;letter-spacing:-0.01em;">🎯 이번 달 오뚝이 미션</div>'
+            f'<div><div style="font-weight:900;color:{theme.BRAND};font-size:1.53rem;margin-bottom:0.4rem;letter-spacing:-0.01em;">▲ 이번 달 오뚝이 미션</div>'
             f'<div style="color:{theme.INK};font-size:0.93rem;line-height:1.55;">'
             f'약정결제비율을 지금보다 <b>약 5%p</b> 높여보는 시나리오예요 (추가 상환 약 <b>{mission_extra:,.0f}원</b>에 해당). '
             f'아래 버튼을 누르면 이 값이 시뮬레이션에 적용돼요 — 미션 달성이 아니라, 행동을 바꿨을 때 '
@@ -1075,14 +1075,14 @@ def render_simulator(bundle: dict, anchor_row, monthly_transaction, derived_feat
     if extra_payment > 0:
         st.markdown(
             theme.alert_card(
-                "📌", "요약",
+                "●", "요약",
                 f"월 {extra_payment:,.0f}원 추가 상환 시, 향후 위험 단계 상승을 완화할 수 있는 것으로 계산됩니다.",
                 tone=new_risk,
             ),
             unsafe_allow_html=True,
         )
 
-    mascot.section_with_accent("🎯 최소 개입액", "위험 단계를 '경고' 미만으로 유지하기 위한 최소 금액입니다.", accent_key="strategy")
+    mascot.section_with_accent("▲ 최소 개입액", "위험 단계를 '경고' 미만으로 유지하기 위한 최소 금액입니다.", accent_key="strategy")
     with st.spinner("계산 중..."):
         min_intervention = find_minimum_intervention(
             model_S, model_r, feature_cols, anchor_row, monthly_transaction, derived_features, horizon=3, target_max_level="경고"
@@ -1108,7 +1108,7 @@ def render_simulator(bundle: dict, anchor_row, monthly_transaction, derived_feat
 
     st.markdown(
         theme.section_header(
-            "📊 추가 상환액별 비교", "매달 얼마를 더 갚느냐에 따라 3개월 뒤 위험 단계가 어떻게 달라지는지 미리 비교해볼 수 있어요."
+            "● 추가 상환액별 비교", "매달 얼마를 더 갚느냐에 따라 3개월 뒤 위험 단계가 어떻게 달라지는지 미리 비교해볼 수 있어요."
         ).strip(),
         unsafe_allow_html=True,
     )
@@ -1251,7 +1251,7 @@ def render_trust():
         with cols[2]:
             st.markdown(theme.metric_tile("C-index (시간분할 test)",
                         f"{ts['three_month_transition_eval']['c_index']}",
-                        note=f"전환 이벤트 {ts['test_events']}건" + (" ⚠️ <30, CI 넓음" if ts["small_sample_warning"] else "")),
+                        note=f"전환 이벤트 {ts['test_events']}건" + (" ▲ <30, CI 넓음" if ts["small_sample_warning"] else "")),
                         unsafe_allow_html=True)
         with cols[3]:
             st.markdown(theme.metric_tile("person-period Brier (CV)",
@@ -1279,7 +1279,7 @@ def render_trust():
             for n in hm["leakage_controls"]:
                 st.caption("• " + n)
             for n in hm["known_limitations"]:
-                st.caption("⚠ " + n)
+                st.caption("▲ " + n)
             st.markdown("**전환확률/예상 전환 시점 예시**")
             st.table(pd.DataFrame(hm["examples_transition_probability"]))
 
@@ -1299,7 +1299,7 @@ def render_trust():
     st.markdown(theme.section_header("모델의 한계").strip(), unsafe_allow_html=True)
     st.markdown(
         theme.alert_card(
-            "ℹ️", "개념검증(PoC) 단계",
+            "●", "개념검증(PoC) 단계",
             "현재 MVP는 공시 통계로 파라미터를 보정한 합성 금융데이터로 검증되었습니다. "
             "실서비스 전환 시에는 실제 금융데이터를 통한 추가 검증과 재학습이 필요합니다.",
             tone="주의",
