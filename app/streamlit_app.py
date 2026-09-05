@@ -688,6 +688,65 @@ def render_risk_factor_explanation(bundle: dict, top: list[dict]) -> str | None:
     return _cached_risk_factor_explanation(key, use_mock)
 
 
+def trajectory_explanation_html(bundle: dict, outlook: list[dict]) -> str:
+    """향후 위험 궤적 차트 아래에, 이 고객의 그래프가 왜 이런 모양으로 나왔고 무엇을
+    뜻하는지 실제 계산값을 근거로 풀어서 설명한다. 이미 계산된 outlook/bundle 값만
+    사용하는 결정적(rule-based) 문장이라 API 호출이 필요 없다 — 그래프 모양(오름/내림/
+    유지)이 3가지뿐이라 LLM 없이도 충분히 자연스럽게 설명할 수 있고, 상환 코칭 탭의
+    행동 제안·시뮬레이션 내용과는 겹치지 않도록 '이 그래프를 어떻게 읽으면 되는지'로만
+    범위를 한정했다."""
+    if not outlook:
+        return ""
+    start, end = outlook[0], outlook[-1]
+    start_share, end_share = start.get("carryover_share"), end.get("carryover_share")
+    if start_share is None or end_share is None:
+        return ""
+
+    diff = end_share - start_share
+    delta = bundle.get("current_delta_3m")
+    gap = bundle.get("current_gap")
+    horizon = end.get("month_offset", len(outlook) - 1)
+
+    lines = [
+        f"지금 리볼빙 의존도는 {start_share * 100:.1f}%예요. 이번 달과 비슷한 카드 사용액·상환 "
+        f"비율이 그대로 이어진다고 가정하면, {horizon}개월 뒤에는 약 {end_share * 100:.1f}%가 "
+        "될 것으로 계산돼요."
+    ]
+
+    if abs(diff) < 0.01:
+        lines.append("지금 흐름이 이어지면 큰 변화 없이 지금과 비슷한 수준을 유지할 것으로 보여요.")
+    elif diff > 0:
+        if delta is not None and delta > 0.005:
+            lines.append(
+                f"최근 3개월간 의존도가 {delta * 100:+.1f}%p로 오름세였는데, 이 흐름이 계속 "
+                "이어지면서 그래프가 완만하게 올라가는 모양으로 나온 거예요."
+            )
+        elif gap is not None and gap <= 0.1:
+            lines.append(
+                "결제여유가 거의 없어서 매달 여유 없이 갚아나가고 있는 지금 패턴이 이어지면서, "
+                "그래프가 완만하게 올라가는 모양으로 나온 거예요."
+            )
+        else:
+            lines.append("지금 결제 패턴이 그대로 이어지면서 그래프가 조금씩 올라가는 모양으로 나온 거예요.")
+    else:
+        lines.append(
+            f"최근 3개월간 의존도가 {delta * 100:+.1f}%p로 개선되고 있는 흐름이 이어지면서, "
+            "그래프가 조금씩 내려가는 모양으로 나온 거예요."
+        )
+
+    start_level, end_level = start.get("level"), end.get("level")
+    if start_level != end_level:
+        lines.append(
+            f"그래서 배경색이 바뀌는 지점에서 위험 단계도 '{start_level}'에서 '{end_level}'(으)로 "
+            "넘어갈 것으로 예측돼요. 즉, 지금 방식을 바꾸지 않으면 이 시점을 전후로 상태가 한 단계 "
+            "나빠질 수 있다는 뜻이에요."
+        )
+    else:
+        lines.append(f"이 기간 동안 위험 단계는 계속 '{start_level}'로 유지될 것으로 예측돼요.")
+
+    return " ".join(lines)
+
+
 def render_risk(bundle: dict, outlook: list[dict], anchor_row: pd.DataFrame, feature_cols: list[str]):
     def _risk_tile(label: str, state: str) -> str:
         c = theme.RISK_COLORS.get(state, theme.RISK_COLORS["관찰"])["main"]
@@ -712,15 +771,27 @@ def render_risk(bundle: dict, outlook: list[dict], anchor_row: pd.DataFrame, fea
 
     # "내 금융 상태" 탭에 있던 향후 위험 궤적 / 위험 전환 전망도 결국 "왜 이런 상태가
     # 되었는지"를 설명하는 내용이라 이 탭으로 모았다(중복 방지).
-    mascot.section_with_accent("향후 위험 궤적", "지금 패턴이 유지될 경우 예상되는 변화예요.", accent_key="focus")
+    mascot.section_with_accent(
+        "향후 위험 궤적",
+        "이번 달과 비슷한 카드 사용액·상환 비율이 이어진다고 가정했을 때 예상되는 변화예요.",
+        accent_key="focus",
+    )
     with st.container(border=True):
         st.markdown(
             f'<div style="color:{theme.SUBTLE};font-size:0.9rem;margin-bottom:0.4rem;">'
-            "이 선은 지금 패턴이 그대로 유지될 경우 예상되는 리볼빙 의존도 변화예요. "
-            "배경 색이 바뀌는 지점이 위험 단계가 전환되는 시점입니다.</div>",
+            "이 선은 '지금 패턴'—즉 이번 달과 비슷한 카드 사용액과 상환 비율—이 그대로 이어진다고 "
+            "가정할 때 예상되는 리볼빙 의존도 변화예요. 배경 색이 바뀌는 지점이 위험 단계가 전환되는 "
+            "시점입니다.</div>",
             unsafe_allow_html=True,
         )
         st.plotly_chart(charts.risk_trajectory_chart(outlook), width="stretch", config={"displayModeBar": False})
+        traj_explanation = trajectory_explanation_html(bundle, outlook)
+        if traj_explanation:
+            st.markdown(
+                f'<div style="color:{theme.INK};font-size:0.93rem;line-height:1.6;margin-top:0.6rem;'
+                f'padding-top:0.6rem;padding-bottom:0.6rem;border-top:1px dashed {theme.LINE};">{traj_explanation}</div>',
+                unsafe_allow_html=True,
+            )
 
     render_hazard_block(bundle, context="risk")
 
