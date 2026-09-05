@@ -453,7 +453,7 @@ def render_sidebar(account_master: pd.DataFrame, feature_table: pd.DataFrame, de
             theme.compact_html(
                 f'<div style="display:flex;align-items:center;gap:0.6rem;margin:0.3rem 0 1rem 0;">'
                 f'<div style="flex:1;min-width:0;">'
-                f'<div class="ottugi-wordmark-sidebar" style="font-size:2.4rem;color:{theme.SIDEBAR_TEXT};line-height:1.05;">오뚝이</div>'
+                f'<div class="ottugi-wordmark" style="font-size:2.4rem;color:{theme.SIDEBAR_TEXT};line-height:1.05;">오뚝이</div>'
                 f'<div style="font-size:0.82rem;color:{theme.SIDEBAR_TEXT_MUTED};font-weight:500;line-height:1.45;margin-top:4px;">'
                 f'당신의 리밸런싱도,<br>쓰러져도 스스로 중심을 되찾는 오뚝이처럼</div></div>'
                 f'<div style="flex-shrink:0;">{_g}</div></div>'

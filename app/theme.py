@@ -71,16 +71,13 @@ SIDEBAR_LINE = "rgba(15,76,76,0.13)"
 SIDEBAR_SELECTED_BG = BRAND       # 선택 탭 = 딥 티얼
 SIDEBAR_SELECTED_TEXT = "#ffffff"
 
-# 브랜드 워드마크("오뚝이") 전용 서체. 마스코트 로고(assets/mascot/all_elements/label_08.png
-# = "뚜기")의 두툼한 라운드 고딕 손글씨 느낌에 가장 근접한 무료 웹폰트로 Google Fonts의
-# 'Black Han Sans'(검은고딕)를 쓴다. 손으로 다듬은 로고라 완전히 같지는 않지만 무게감·형태가
-# 비슷하다. 폰트 로딩 실패 시 시스템 고딕으로 폴백한다. 단일 웨이트(400)이므로 font-weight는
-# 지정하지 않는다.
-LOGO_FONT = '"Black Han Sans", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif'
-# 사이드바 "오뚝이" 워드마크 전용 서체. Black Han Sans보다 덜 두껍고 둥글둥글한 인상을
-# 위해 Google Fonts의 'Jua'(주아체)를 쓴다 — 단일 웨이트의 둥근 고딕으로, 귀여운
-# 마스코트 톤에 더 잘 어울린다(본문 헤더의 ottugi-wordmark는 기존 서체 유지).
-SIDEBAR_LOGO_FONT = '"Jua", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif'
+# 브랜드 워드마크("오뚝이") 전용 서체. 원래는 마스코트 로고(assets/mascot/all_elements/
+# label_08.png = "뚜기")의 두툼한 라운드 고딕 손글씨 느낌에 가까운 'Black Han Sans'
+# (검은고딕)를 썼는데, 너무 두껍고 각져 보인다는 피드백으로 Google Fonts의 'Jua'
+# (주아체)로 교체했다 — 단일 웨이트의 둥글둥글한 고딕으로, 귀여운 마스코트 톤에 더
+# 잘 어울린다. 사이드바/본문 헤더 모두 이 서체 하나로 통일한다. 폰트 로딩 실패 시
+# 시스템 고딕으로 폴백한다.
+LOGO_FONT = '"Jua", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif'
 
 
 def compact_html(html: str) -> str:
@@ -96,19 +93,14 @@ def inject_global_css() -> None:
     st.markdown(
         f"""
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Jua&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Jua&display=swap');
         html, body, [class*="css"] {{
             font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
                 "Malgun Gothic", "Segoe UI", sans-serif;
         }}
-        /* 브랜드 워드마크("오뚝이") — 마스코트 로고 서체에 근접한 라운드 고딕 */
+        /* 브랜드 워드마크("오뚝이") — 둥글둥글한 인상의 서체. 사이드바/본문 헤더 공용 */
         .ottugi-wordmark {{
             font-family: {LOGO_FONT};
-            letter-spacing: 0.03em;
-        }}
-        /* 사이드바 워드마크 — 덜 두껍고 둥글둥글한 인상의 서체 */
-        .ottugi-wordmark-sidebar {{
-            font-family: {SIDEBAR_LOGO_FONT};
             letter-spacing: 0.02em;
         }}
         .stApp {{
