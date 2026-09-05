@@ -628,7 +628,7 @@ def render_home(bundle: dict, outlook: list[dict]):
         )
     else:
         st.markdown(
-            theme.alert_card("●", "안정적인 흐름", "향후 3개월간 현재 추세가 유지된다면 경고 단계로 전환되지 않을 것으로 예측됩니다.", tone="관찰"),
+            theme.alert_card("", "안정적인 흐름", "향후 3개월간 현재 추세가 유지된다면 경고 단계로 전환되지 않을 것으로 예측됩니다.", tone="관찰"),
             unsafe_allow_html=True,
         )
 
@@ -636,7 +636,7 @@ def render_home(bundle: dict, outlook: list[dict]):
     # 전부 "왜 이런 상태가 되었는지"를 설명하는 내용이라 위험 분석 탭과 겹친다. 두 탭에
     # 똑같이 두는 대신 위험 분석 탭 하나로 모으고, 여기서는 버튼으로 안내만 한다.
     st.markdown(
-        theme.alert_card("▲", "추천 행동", risk_level_action_text(bundle["predicted_risk"]), tone=bundle["predicted_risk"]),
+        theme.alert_card("", "추천 행동", risk_level_action_text(bundle["predicted_risk"]), tone=bundle["predicted_risk"]),
         unsafe_allow_html=True,
     )
 
@@ -803,7 +803,7 @@ def render_risk(bundle: dict, outlook: list[dict], anchor_row: pd.DataFrame, fea
         "왜 이런 상태가 되었을까요?",
         "최근 결제 패턴 중에서 지금 상태에 가장 크게 영향을 준 항목들이에요. 막대가 길수록 영향이 크고, "
         "주황색은 위험을 높이는 방향, 청록색은 낮추는 방향이에요.",
-        accent_key="report",
+        accent_key="analyze",
     )
     top = top_signals(bundle, k=5)
     merged_shap = {s["feature"]: s["value"] for s in top}
@@ -821,42 +821,6 @@ def render_risk(bundle: dict, outlook: list[dict], anchor_row: pd.DataFrame, fea
                 f'padding-top:0.6rem;padding-bottom:0.6rem;border-top:1px dashed {theme.LINE};">{explanation}</div>',
                 unsafe_allow_html=True,
             )
-
-    with st.expander("전문 분석 보기 (원본 피처명 · SHAP 수치)"):
-        def shap_section(shap_dict: dict, title: str, k: int = 5):
-            st.markdown(f'<div style="font-weight:800;color:{theme.INK};font-size:0.95rem;">{title}</div>', unsafe_allow_html=True)
-            st.plotly_chart(charts.shap_bar_chart(shap_dict, FEATURE_LABELS, k=k), width="stretch",
-                             config={"displayModeBar": False}, key=f"risk_expert_chart_{title}")
-
-        cc1, cc2 = st.columns(2)
-        with cc1:
-            shap_section(bundle["shap_S"], "다음 달 사용액 예측 (모델 f1)")
-        with cc2:
-            shap_section(bundle["shap_r"], "다음 달 상환 비율 예측 (모델 f2)")
-
-        st.markdown("**원본 변수명 · SHAP 수치**")
-
-        def shap_bar(shap_dict: dict, title: str):
-            items = sorted(shap_dict.items(), key=lambda kv: abs(kv[1]), reverse=True)[:10]
-            labels = [f for f, _ in items]
-            values = [v for _, v in items]
-            colors = ["#c62828" if v > 0 else "#1565c0" for v in values]
-            fig = go.Figure(go.Bar(x=values, y=labels, orientation="h", marker_color=colors))
-            fig.update_layout(title=title, height=380, yaxis=dict(autorange="reversed"), margin=dict(l=10, r=10, t=40, b=10))
-            st.plotly_chart(fig, width="stretch", key=f"risk_expert_raw_{title}")
-
-        ccc1, ccc2 = st.columns(2)
-        with ccc1:
-            shap_bar(bundle["shap_S"], f"S(t+1) 예측 기여도 (base={bundle['base_S']:,.0f}원)")
-        with ccc2:
-            shap_bar(bundle["shap_r"], f"r(t+1) 예측 기여도 (base={bundle['base_r']*100:.1f}%)")
-        st.caption("빨간 막대 = 값을 높이는 방향, 파란 막대 = 낮추는 방향으로 기여 (SHAP feature importance)")
-
-        st.markdown("**모델 입력값 (원본 피처명)**")
-        st.write(f"예측값 — 다음 달 사용액(S): {bundle['pred_S']:,.0f}원 / 다음 달 상환 비율(r): {bundle['pred_r']*100:.1f}%")
-        row = anchor_row.iloc[0]
-        input_row = {c: (None if pd.isna(row.get(c)) else row.get(c)) for c in feature_cols if c in row.index}
-        st.dataframe(pd.DataFrame([input_row]).T.rename(columns={0: "값"}), width="stretch")
 
     if st.button("AI 코칭 받기", type="primary"):
         go_to("coaching")
@@ -957,7 +921,7 @@ def render_coaching(bundle: dict, anchor_row, monthly_transaction, derived_featu
 
     if message.get("summary"):
         st.markdown(
-            theme.alert_card("●", "한 줄 요약", message["summary"], tone=bundle["predicted_risk"]),
+            theme.alert_card("", "한 줄 요약", message["summary"], tone=bundle["predicted_risk"]),
             unsafe_allow_html=True,
         )
 
@@ -1022,7 +986,7 @@ def render_simulator(bundle: dict, anchor_row, monthly_transaction, derived_feat
             f'<div style="background:{theme.SURFACE};border:1px dashed {_acc_ap}80;border-left:4px solid {_acc_ap};'
             f'border-radius:14px;padding:1.1rem 1.3rem;margin:0.6rem 0;display:flex;gap:0.8rem;align-items:flex-start;">'
             f'{mascot.accent("applaud", size_px=58)}'
-            f'<div><div style="font-weight:900;color:{theme.BRAND};font-size:1.53rem;margin-bottom:0.4rem;letter-spacing:-0.01em;">▲ 이번 달 오뚝이 미션</div>'
+            f'<div><div style="font-weight:900;color:{theme.BRAND};font-size:1.53rem;margin-bottom:0.4rem;letter-spacing:-0.01em;">이번 달 오뚝이 미션</div>'
             f'<div style="color:{theme.INK};font-size:0.93rem;line-height:1.55;">'
             f'약정결제비율을 지금보다 <b>약 5%p</b> 높여보는 시나리오예요 (추가 상환 약 <b>{mission_extra:,.0f}원</b>에 해당). '
             f'아래 버튼을 누르면 이 값이 시뮬레이션에 적용돼요 — 미션 달성이 아니라, 행동을 바꿨을 때 '
@@ -1030,9 +994,10 @@ def render_simulator(bundle: dict, anchor_row, monthly_transaction, derived_feat
         ),
         unsafe_allow_html=True,
     )
-    if st.button("이 미션 시나리오 적용해보기", key="apply_mission"):
-        st.session_state["prefill_extra_payment"] = mission_extra
-        st.rerun()
+    with st.container(key="mission_apply_btn"):
+        if st.button("이 미션 시나리오 적용해보기", key="apply_mission", type="primary", width="stretch"):
+            st.session_state["prefill_extra_payment"] = mission_extra
+            st.rerun()
     SLIDER_KEY, NUMBER_KEY = "extra_payment_slider_widget", "extra_payment_number_widget"
 
     # 슬라이더/숫자입력 두 위젯을 같은 값으로 동기화한다. 위젯에 key가 이미 지정돼 있으면
@@ -1118,21 +1083,29 @@ def render_simulator(bundle: dict, anchor_row, monthly_transaction, derived_feat
     st.markdown(compare_html, unsafe_allow_html=True)
 
     # 회복 게이지 + 마스코트 갱신 (시뮬레이션 상태 반영) + hazard 재계산
+    # 마스코트 박스와 회복 게이지 박스의 세로 길이가 어긋나 보이던 문제를, 내 금융 상태
+    # 탭 상단과 동일한 방식(하나의 flex row + fill_height)으로 맞췄다. 마스코트는 기존
+    # 대비 70% 크기(170px -> 119px)로 줄이고 카드 여백도 함께 줄였다.
     _dscore = _sim_recovery - bundle.get("predicted_recovery_score", _sim_recovery)
-    _mc1, _mc2 = st.columns([1, 2])
-    with _mc1:
-        mascot.render(new_risk, recovery_score=_sim_recovery, size_px=170, key="sim",
-                      caption=("시나리오를 적용하면 오뚝이 상태가 이렇게 바뀌는 것으로 계산돼요."
-                               if extra_payment > 0 else None))
-    with _mc2:
-        st.markdown(
-            theme.recovery_gauge_html(
+    st.markdown(
+        theme.compact_html(
+            '<div style="display:flex;gap:0.9rem;align-items:stretch;flex-wrap:wrap;margin:0.2rem 0 0.6rem 0;">'
+            + mascot.card_html(
+                new_risk, recovery_score=_sim_recovery, size_px=119, key="sim",
+                pad="0.8rem 1rem", fill_height=True,
+                caption=("시나리오를 적용하면 오뚝이 상태가 이렇게 바뀌는 것으로 계산돼요."
+                         if extra_payment > 0 else None),
+            )
+            + theme.recovery_gauge_html(
                 _sim_recovery,
                 delta=_dscore,
                 hint=rec.recovery_hint(new_risk, simulation_delta_score=_dscore),
-            ),
-            unsafe_allow_html=True,
-        )
+                fill_height=True,
+            )
+            + "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
     _sim_hzb = _simulated_hazard_bundle(anchor_row, bundle, sim_calc, new_risk, new_delta_3m, new_streak)
     if bundle.get("hazard") and bundle["hazard"].get("applicable") and _sim_hzb and _sim_hzb.get("applicable"):
         _b = bundle["hazard"].get("transition_probability_3m")
@@ -1153,25 +1126,22 @@ def render_simulator(bundle: dict, anchor_row, monthly_transaction, derived_feat
             unsafe_allow_html=True,
         )
 
-    mascot.section_with_accent("▲ 최소 개입액", "위험 단계를 '경고' 미만으로 유지하기 위한 최소 금액입니다.", accent_key="strategy")
+    mascot.section_with_accent("최소 개입액", "위험 단계를 '경고' 미만으로 유지하기 위한 최소 금액입니다.", accent_key="strategy")
     with st.spinner("계산 중..."):
         min_intervention = find_minimum_intervention(
             model_S, model_r, feature_cols, anchor_row, monthly_transaction, derived_features, horizon=3, target_max_level="경고"
         )
     if min_intervention["achieved"] and min_intervention["extra_payment"] and min_intervention["extra_payment"] > 0:
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            st.markdown(
-                theme.card_open()
-                + f'<div style="font-size:1.8rem;font-weight:900;color:{theme.BRAND};">월 {min_intervention["extra_payment"]:,.0f}원</div>'
-                + f'<div style="color:{theme.SUBTLE};margin-top:4px;">이 금액을 추가 상환하면 향후 3개월 동안 위험도가 "경고" 이상으로 상승하지 않는 것으로 계산됩니다.</div>'
-                + theme.card_close(),
-                unsafe_allow_html=True,
-            )
-        with c2:
-            if st.button("이 금액 적용하기", width="stretch"):
-                st.session_state["prefill_extra_payment"] = int(min_intervention["extra_payment"])
-                st.rerun()
+        st.markdown(
+            theme.card_open()
+            + f'<div style="font-size:1.8rem;font-weight:900;color:{theme.BRAND};">월 {min_intervention["extra_payment"]:,.0f}원</div>'
+            + f'<div style="color:{theme.SUBTLE};margin-top:4px;">이 금액을 추가 상환하면 향후 3개월 동안 위험도가 "경고" 이상으로 상승하지 않는 것으로 계산됩니다.</div>'
+            + theme.card_close(),
+            unsafe_allow_html=True,
+        )
+        if st.button("이 금액 적용하기", type="primary", width="stretch"):
+            st.session_state["prefill_extra_payment"] = int(min_intervention["extra_payment"])
+            st.rerun()
     elif min_intervention["achieved"]:
         st.info("추가 상환 없이도 향후 3개월간 '경고' 단계로 상승하지 않을 것으로 예측됩니다.")
     else:
@@ -1179,7 +1149,7 @@ def render_simulator(bundle: dict, anchor_row, monthly_transaction, derived_feat
 
     st.markdown(
         theme.section_header(
-            "● 추가 상환액별 비교", "매달 얼마를 더 갚느냐에 따라 3개월 뒤 위험 단계가 어떻게 달라지는지 미리 비교해볼 수 있어요."
+            "추가 상환액별 비교", "매달 얼마를 더 갚느냐에 따라 3개월 뒤 위험 단계가 어떻게 달라지는지 미리 비교해볼 수 있어요."
         ).strip(),
         unsafe_allow_html=True,
     )
@@ -1209,30 +1179,42 @@ def render_simulator(bundle: dict, anchor_row, monthly_transaction, derived_feat
 
     baseline_level = scenario_results[0]["level"]
     base_rscore = scenario_results[0]["recovery_score"]
-    cmp_cols = st.columns(len(scenario_results))
-    for col, sc in zip(cmp_cols, scenario_results):
-        with col:
-            gauge_line = (
-                f'<div style="margin-top:6px;font-size:0.8rem;color:{theme.SUBTLE};">회복 게이지 '
-                f'<b style="color:{theme.INK};">{sc["recovery_score"]:.0f}</b>'
-                + (f' <span style="color:{theme.RISK_COLORS["관찰"]["main"] if sc["recovery_score"]>=base_rscore else theme.RISK_COLORS["경고"]["main"]};">'
-                   f'({sc["recovery_score"]-base_rscore:+.0f})</span>' if sc is not scenario_results[0] else "")
-                + "</div>"
+    # st.columns()는 각 칸이 서로 독립된 블록이라, 문장 길이가 다른 카드들의 세로 길이가
+    # 서로 안 맞았다. 위(마스코트+회복 게이지)와 동일하게 카드 전체를 하나의 flex row
+    # HTML로 만들어서, 가장 긴 카드(문장이 긴 카드) 기준으로 나머지 카드 높이를 맞췄다.
+    card_htmls = []
+    for sc in scenario_results:
+        gauge_line = (
+            f'<div style="margin-top:6px;font-size:0.8rem;color:{theme.SUBTLE};">회복 게이지 '
+            f'<b style="color:{theme.INK};">{sc["recovery_score"]:.0f}</b>'
+            + (f' <span style="color:{theme.RISK_COLORS["관찰"]["main"] if sc["recovery_score"]>=base_rscore else theme.RISK_COLORS["경고"]["main"]};">'
+               f'({sc["recovery_score"]-base_rscore:+.0f})</span>' if sc is not scenario_results[0] else "")
+            + "</div>"
+        )
+        if sc["extra_payment"] == 0:
+            body = f'<div style="text-align:center;"><b>{sc["label"]}</b><br><br>{theme.risk_badge_html(sc["level"], "sm")}{gauge_line}</div>'
+            accent = theme.SUBTLE
+        else:
+            improved = theme.RISK_ORDER[sc["level"]] < theme.RISK_ORDER[baseline_level]
+            verb = "낮아집니다" if improved else "유지됩니다"
+            sentence = f'{sc["label"]}(추가 상환 약 {sc["extra_payment"]:,.0f}원) 가정 시, 3개월 뒤 위험 단계가 {baseline_level}에서 {sc["level"]}로 {verb}.'
+            body = (
+                f'<div style="text-align:center;font-weight:800;">{sc["label"]}</div>'
+                f'<div style="text-align:center;margin-top:4px;">{theme.risk_badge_html(baseline_level, "sm")} → {theme.risk_badge_html(sc["level"], "sm")}</div>'
+                f'<div style="margin-top:8px;font-size:0.8rem;">{theme.highlight_text(sentence)}</div>{gauge_line}'
             )
-            if sc["extra_payment"] == 0:
-                body = f'<div style="text-align:center;"><b>{sc["label"]}</b><br><br>{theme.risk_badge_html(sc["level"], "sm")}{gauge_line}</div>'
-                accent = theme.SUBTLE
-            else:
-                improved = theme.RISK_ORDER[sc["level"]] < theme.RISK_ORDER[baseline_level]
-                verb = "낮아집니다" if improved else "유지됩니다"
-                sentence = f'{sc["label"]}(추가 상환 약 {sc["extra_payment"]:,.0f}원) 가정 시, 3개월 뒤 위험 단계가 {baseline_level}에서 {sc["level"]}로 {verb}.'
-                body = (
-                    f'<div style="text-align:center;font-weight:800;">{sc["label"]}</div>'
-                    f'<div style="text-align:center;margin-top:4px;">{theme.risk_badge_html(baseline_level, "sm")} → {theme.risk_badge_html(sc["level"], "sm")}</div>'
-                    f'<div style="margin-top:8px;font-size:0.8rem;">{theme.highlight_text(sentence)}</div>{gauge_line}'
-                )
-                accent = theme.BRAND if improved else theme.SUBTLE
-            st.markdown(theme.coaching_card(body, accent=accent), unsafe_allow_html=True)
+            accent = theme.BRAND if improved else theme.SUBTLE
+        card_htmls.append(
+            f'<div style="flex:1;min-width:150px;">{theme.coaching_card(body, accent=accent, fill_height=True)}</div>'
+        )
+    st.markdown(
+        theme.compact_html(
+            '<div style="display:flex;gap:0.8rem;align-items:stretch;flex-wrap:wrap;">'
+            + "".join(card_htmls)
+            + "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
 
     if st.button("AI 코칭에서 결과 확인하기 →", type="primary"):
         go_to("coaching")

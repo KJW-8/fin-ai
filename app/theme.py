@@ -252,6 +252,11 @@ def inject_global_css() -> None:
             background: #163c49;
             border-color: #163c49;
         }}
+        /* "이 미션 시나리오 적용해보기" 버튼: 눈에 잘 띄도록 더 크게 */
+        .st-key-mission_apply_btn .stButton > button {{
+            padding: 0.85rem 1.4rem;
+            font-size: 1.05rem;
+        }}
         /* 구분선 여백 정리 */
         hr {{
             margin: 1.6rem 0;
@@ -414,11 +419,12 @@ def risk_hero_card(level: str, headline: str, sub_metrics_html: str, stepper_htm
 
 def alert_card(icon: str, title: str, body: str, tone: str = "경고") -> str:
     c = RISK_COLORS.get(tone, {"main": "#616161", "bg": "#eee", "border": "#ccc"})
+    title_html = f"{icon} {title}" if icon else title
     return compact_html(f"""
     <div style="background:{c['bg']};border:1px solid {c['border']};border-radius:16px;
                 padding:1.2rem 1.4rem;margin:1rem 0;">
         <div style="font-weight:800;color:{c['main']};font-size:1rem;margin-bottom:0.35rem;">
-            {icon} {title}
+            {title_html}
         </div>
         <div style="color:{INK};font-size:0.95rem;">{highlight_text(body)}</div>
     </div>
@@ -515,11 +521,19 @@ def big_section_title(label: str, accent: str = BRAND, icon: str = "") -> str:
     """)
 
 
-def coaching_card(body_html: str, accent: str = BRAND) -> str:
-    """coaching_section_title() 바로 아래에 오는 본문 박스 (제목은 별도 컴포넌트로 분리됨)."""
+def coaching_card(body_html: str, accent: str = BRAND, *, fill_height: bool = False) -> str:
+    """coaching_section_title() 바로 아래에 오는 본문 박스 (제목은 별도 컴포넌트로 분리됨).
+
+    fill_height=True: 카드를 여러 개 한 flex row(align-items:stretch)에 나란히 놓을 때,
+    문장 길이가 짧은 카드도 가장 긴 카드 기준으로 세로 길이를 맞추도록 height:100%로
+    부모(=flex item) 높이를 그대로 채운다. 이때는 margin-bottom도 0으로 둬서(간격은
+    바깥 flex row의 gap으로 처리) 카드 높이가 부모 높이를 넘치지 않게 한다.
+    """
+    margin = "0" if fill_height else "1.4rem"
+    h = "height:100%;box-sizing:border-box;" if fill_height else ""
     return compact_html(f"""
     <div style="background:{SURFACE};border:1px solid {LINE};border-left:5px solid {accent};
-                border-radius:14px;padding:1.2rem 1.5rem;margin-bottom:1.4rem;">
+                border-radius:14px;padding:1.2rem 1.5rem;margin-bottom:{margin};{h}">
         <div style="color:{INK};font-size:1.02rem;">{body_html}</div>
     </div>
     """)
