@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any
 
 import jsonschema
@@ -176,6 +177,94 @@ def validate_coaching_message(message: Any, available_sources: set[str]) -> None
             f"허용되지 않은 source 태그 사용: {sorted(invalid)} "
             f"(이번 호출에서 사용 가능한 source: {sorted(available_sources)})"
         )
+
+
+# ---------------------------------------------------------------------------
+# 실 API(real_generate_*) 응답 재검증 — "실 API 모드에서도, 답변에 안전장치가 필요하지
+# 않을까?" 라는 질문에 대한 답. JSON Schema/source 검증은 "형식"만 확인할 뿐, 문장
+# 안의 숫자가 실제 계산값과 맞는지(환각 방지)나 과잉확언·투자권유 같은 금칙 표현이
+# 없는지는 확인하지 않는다. 아래 두 검사를 추가하고, 하나라도 걸리면 generate_*()가
+# 예외를 던지는 대신 mock 템플릿으로 자동 폴백한다(사용자에게 절대 위험하거나 깨진
+# 문장을 보여주지 않는 게 최우선이라, mock으로 대체하는 쪽이 오류를 그대로 보여주는
+# 것보다 안전하다). mock 모드에서는 이미 실제 수치로 문장을 만들기 때문에 이 검사를
+# 통과하지 못할 일이 없다 — 실 API 응답에 대해서만 의미가 있다.
+# ---------------------------------------------------------------------------
+FORBIDDEN_PHRASES = (
+    "보장합니다", "보장돼요", "보장됩니다", "보장해요", "확정적으로", "무조건",
+    "투자하세요", "매수", "매도", "가입하세요", "승인됩니다", "승인됐어요",
+    "신용점수", "신용등급",
+)
+
+_NUM_TOKEN_RE = re.compile(r"([+-]?\d[\d,]*\.?\d*)\s*(%p|%|원)")
+
+
+def _harvest_numeric_leaves(obj: Any) -> list[float]:
+    """context 안의 숫자 leaf 값을 모두 재귀적으로 모은다(bool/NaN/None은 제외).
+    필드명을 일일이 나열하지 않고 값 자체만 훑기 때문에, context 구조가 늘어나도
+    자동으로 검증 대상에 포함된다."""
+    out: list[float] = []
+    if isinstance(obj, bool):
+        return out
+    if isinstance(obj, (int, float)):
+        v = float(obj)
+        if v == v:  # NaN 제외
+            out.append(v)
+        return out
+    if isinstance(obj, dict):
+        for v in obj.values():
+            out.extend(_harvest_numeric_leaves(v))
+        return out
+    if isinstance(obj, (list, tuple)):
+        for v in obj:
+            out.extend(_harvest_numeric_leaves(v))
+        return out
+    return out
+
+
+def _reference_number_sets(context: dict) -> tuple[set[float], set[float]]:
+    """숫자 사실검증 기준값. 절대값 3 이하인 값(비율류: carryover_share, gap, delta,
+    전환확률 등)은 퍼센트로 환산해 pct 기준에, 나머지(금액 등 큰 값)는 그대로 amt
+    기준에 넣는다. "개월"은 검증 대상에서 뺐다 — "최근 3개월"·"향후 3개월"처럼
+    특정 고객의 계산값이 아니라 서비스 전체가 쓰는 고정된 관측/전망 기간(3개월)을
+    가리키는 경우가 대부분이라, 값으로 대조하면 정상 문장까지 오탐하기 쉽다."""
+    nums = _harvest_numeric_leaves(context)
+    pct_refs = {round(v * 100, 1) for v in nums if abs(v) <= 3}
+    amt_refs = {round(v) for v in nums}
+    return pct_refs, amt_refs
+
+
+def _check_numeric_grounding(text: str, context: dict) -> list[str]:
+    """문장에 등장하는 숫자(%, %p, 원)가 context의 실제 계산값과 허용 오차 내에서
+    맞는지 확인한다. 근거를 못 찾은 숫자 표기 목록을 반환(비어 있으면 통과)."""
+    pct_refs, amt_refs = _reference_number_sets(context)
+    problems = []
+    for raw, unit in _NUM_TOKEN_RE.findall(text):
+        try:
+            n = float(raw.replace(",", ""))
+        except ValueError:
+            continue
+        if unit in ("%", "%p"):
+            if pct_refs and not any(abs(n - r) <= 1.0 for r in pct_refs):
+                problems.append(f"{raw}{unit}")
+        else:  # 원
+            if amt_refs and not any(abs(n - r) <= max(5000.0, abs(r) * 0.08) for r in amt_refs):
+                problems.append(f"{raw}{unit}")
+    return problems
+
+
+def _check_forbidden_phrases(text: str) -> list[str]:
+    return [p for p in FORBIDDEN_PHRASES if p in text]
+
+
+def verify_generated_text(text: str, context: dict) -> None:
+    """숫자 환각·금칙어 검사. 하나라도 걸리면 CoachingValidationError를 던진다
+    (호출부가 이를 잡아 mock으로 폴백)."""
+    numeric_problems = _check_numeric_grounding(text, context)
+    if numeric_problems:
+        raise CoachingValidationError(f"근거를 찾을 수 없는 숫자: {numeric_problems}")
+    forbidden = _check_forbidden_phrases(text)
+    if forbidden:
+        raise CoachingValidationError(f"금칙 표현 포함: {forbidden}")
 
 
 # ---------------------------------------------------------------------------
@@ -501,11 +590,30 @@ def generate_coaching_message(context: dict, use_mock: bool | None = None) -> di
         _hydrate_env_from_st_secrets()
         use_mock = os.environ.get("USE_MOCK_COACHING", "true").strip().lower() != "false"
 
-    message = mock_generate_coaching_message(context) if use_mock else real_generate_coaching_message(context)
-
     available_sources = available_sources_for_context(context)
-    validate_coaching_message(message, available_sources)
-    return message
+
+    def _mock() -> dict:
+        message = mock_generate_coaching_message(context)
+        validate_coaching_message(message, available_sources)
+        return message
+
+    if use_mock:
+        return _mock()
+
+    # 실 API 경로: 생성 -> 스키마/근거(source) 검증 -> 숫자 사실검증·금칙어 검사까지
+    # 전부 통과해야 그대로 내보낸다. API 호출 자체가 실패하든, 검증 중 무엇 하나가
+    # 걸리든(형식 오류·근거 없는 source·숫자 환각·과잉확언 전부 포함) 예외를 그대로
+    # 올리지 않고 mock 템플릿으로 조용히 대체한다 — 화면이 깨지거나 위험한 문장이
+    # 노출되는 것보다는, 검증된 mock 문구를 보여주는 쪽이 항상 더 안전하다.
+    try:
+        message = real_generate_coaching_message(context)
+        validate_coaching_message(message, available_sources)
+        full_text = (message.get("summary") or "") + " " + " ".join(seg["text"] for seg in message["segments"])
+        verify_generated_text(full_text, context)
+        return message
+    except Exception as e:
+        print(f"[coaching] 실 API 응답이 검증을 통과하지 못해 mock으로 대체합니다: {e}")
+        return _mock()
 
 
 # ---------------------------------------------------------------------------
@@ -674,16 +782,31 @@ def generate_risk_factor_explanation(context: dict, use_mock: bool | None = None
         _hydrate_env_from_st_secrets()
         use_mock = os.environ.get("USE_MOCK_COACHING", "true").strip().lower() != "false"
 
-    message = (
-        mock_generate_risk_factor_explanation(context)
-        if use_mock
-        else real_generate_risk_factor_explanation(context)
-    )
+    def _validate(message: dict) -> None:
+        try:
+            jsonschema.validate(instance=message, schema=RISK_FACTOR_SCHEMA)
+        except jsonschema.ValidationError as e:
+            raise CoachingValidationError(f"JSON Schema 검증 실패: {e.message}") from e
+
+    def _mock() -> dict:
+        message = mock_generate_risk_factor_explanation(context)
+        _validate(message)
+        return message
+
+    if use_mock:
+        return _mock()
+
+    # 실 API 경로: generate_coaching_message()와 동일한 원칙 — 스키마 검증에 더해
+    # 숫자 사실검증·금칙어 검사까지 통과해야 그대로 내보내고, 무엇 하나라도 걸리면
+    # (API 호출 실패 포함) mock으로 조용히 대체한다.
     try:
-        jsonschema.validate(instance=message, schema=RISK_FACTOR_SCHEMA)
-    except jsonschema.ValidationError as e:
-        raise CoachingValidationError(f"JSON Schema 검증 실패: {e.message}") from e
-    return message
+        message = real_generate_risk_factor_explanation(context)
+        _validate(message)
+        verify_generated_text(message["explanation"], context)
+        return message
+    except Exception as e:
+        print(f"[risk_factor] 실 API 응답이 검증을 통과하지 못해 mock으로 대체합니다: {e}")
+        return _mock()
 
 
 if __name__ == "__main__":
