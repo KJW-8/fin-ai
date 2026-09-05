@@ -31,6 +31,7 @@ RISK_ORDER = {"관찰": 0, "주의": 1, "경고": 2, "심화": 3}
 SOURCE_META = {
     "raw_data": {"label": "실제 입력 데이터", "color": "#2563a8", "icon": "📄"},
     "shap": {"label": "예측에 영향을 준 요인", "color": "#7a4fb5", "icon": "🔎"},
+    "hazard": {"label": "위험 전환 전망", "color": "#b06a1a", "icon": "⏳"},
     # 예전엔 "#1a7f5a"(=RISK_COLORS["관찰"]과 동일한 값)를 썼는데, 브랜드 컬러 정비 과정에서
     # "상태 신호(위험도) 색상"과 "그 외 용도" 색상이 우연히 겹치던 것을 발견해 브랜드
     # 컬러로 바꿔 분리했다.
@@ -176,6 +177,22 @@ def inject_global_css() -> None:
         }}
         section[data-testid="stSidebar"] label[data-testid="stRadioOption"]:first-child {{
             border-top: 1px solid {SIDEBAR_LINE};
+        }}
+        /* 메인 네비게이션(6개 항목)의 5번째 옵션("전문 분석") 앞에 "서비스 검증" 구분
+           라벨을 넣어, 고객용 4개 화면과 검증용 2개 화면을 시각적으로 분리한다.
+           DEMO MODE 라디오는 옵션이 4개뿐이라 5번째가 없어 이 규칙의 영향을 받지 않는다. */
+        section[data-testid="stSidebar"] div[role="radiogroup"] > label[data-testid="stRadioOption"]:nth-of-type(5) {{
+            margin-top: 14px;
+            position: relative;
+        }}
+        section[data-testid="stSidebar"] div[role="radiogroup"] > label[data-testid="stRadioOption"]:nth-of-type(5)::before {{
+            content: "서비스 검증";
+            display: block;
+            font-size: 0.72rem;
+            font-weight: 800;
+            letter-spacing: 0.05em;
+            color: {SIDEBAR_TEXT_MUTED};
+            padding: 4px 0.9rem 6px;
         }}
         /* 원형 인디케이터 숨김 */
         section[data-testid="stSidebar"] label[data-testid="stRadioOption"] > div > div > div:first-child {{
@@ -340,7 +357,7 @@ RISK_LEVEL_EXPLANATIONS = {
     "관찰": "아직 안정적인 상태예요. 지금처럼만 유지하시면 됩니다.",
     "주의": "리볼빙 의존도가 조금씩 늘고 있어요. 결제 비율을 조금 높이면 안정을 되찾을 수 있어요.",
     "경고": "결제 여유가 얼마 남지 않았어요. 지금 추가로 상환하면 효과가 큰 시점이에요.",
-    "심화": "최소한만 갚는 상태가 오래 이어지고 있어요. 적극적인 개입이 필요해요.",
+    "심화": "최소한만 갚는 상태가 오래 이어지고 있어요. 지금부터 작은 상환 변화가 중요한 시점이에요.",
 }
 
 
@@ -373,8 +390,11 @@ def risk_stepper_html(current_level: str) -> str:
     return compact_html(track + explanation)
 
 
-def risk_hero_card(level: str, headline: str, sub_metrics_html: str) -> str:
+def risk_hero_card(level: str, headline: str, sub_metrics_html: str, stepper_html: str = "") -> str:
+    """현재 위험 단계 카드. stepper_html 을 넘기면 같은 카드 안에 이어 붙여, 같은 정보를
+    두 개의 흰 카드로 반복해 보여주지 않는다."""
     c = RISK_COLORS.get(level, {"main": "#616161", "bg": "#eee", "border": "#ccc"})
+    stepper_block = f'<div style="margin-top:1.2rem;">{stepper_html}</div>' if stepper_html else ""
     return compact_html(f"""
     <div style="background:{SURFACE};border:1px solid {LINE};border-radius:18px;padding:1.6rem 1.8rem;">
         <div style="color:{SUBTLE};font-size:0.85rem;font-weight:700;margin-bottom:0.5rem;">
@@ -387,6 +407,7 @@ def risk_hero_card(level: str, headline: str, sub_metrics_html: str) -> str:
             <div style="color:{SUBTLE};font-size:0.95rem;">{headline}</div>
         </div>
         <div style="margin-top:1.1rem;">{sub_metrics_html}</div>
+        {stepper_block}
     </div>
     """)
 
@@ -444,6 +465,11 @@ def recovery_gauge_html(score: float, *, hint: str = "", delta: float | None = N
     hint_html = f'<div style="color:{SUBTLE};font-size:0.85rem;margin-top:0.5rem;line-height:1.45;">{hint}</div>' if hint else ""
     h = ("box-sizing:border-box;flex:1 1 300px;align-self:stretch;display:flex;flex-direction:column;"
          "justify-content:center;margin:0;") if fill_height else "margin:0.6rem 0;"
+    # 신용점수 등 공식 지표로 오해되지 않도록, 게이지 아래 근거를 항상 짧게 밝혀둔다.
+    disclaimer_html = (
+        f'<div style="color:{SUBTLE};font-size:0.72rem;margin-top:0.5rem;opacity:0.85;">'
+        "현재 금융 행동과 상환 시뮬레이션을 바탕으로 산출한 서비스 내 참고 지표예요.</div>"
+    )
     return compact_html(f"""
     <div style="background:{SURFACE};border:1px solid {LINE};border-radius:16px;padding:0.95rem 1.2rem;{h}">
         <div style="display:flex;align-items:baseline;justify-content:space-between;">
@@ -455,6 +481,7 @@ def recovery_gauge_html(score: float, *, hint: str = "", delta: float | None = N
             <div style="width:{score:.1f}%;height:100%;background:{c};border-radius:999px;transition:width 0.5s ease;"></div>
         </div>
         {hint_html}
+        {disclaimer_html}
     </div>
     """)
 
@@ -531,15 +558,20 @@ def cta_button_note(text: str) -> str:
 
 
 def forecast_timeline_html(steps: list[dict]) -> str:
-    """steps: [{"label": "현재", "level": "주의", "value": "34.2%"}, ...]"""
+    """steps: [{"label": "현재", "level": "주의", "value": "34.2%", "icon": "<img.../>"(선택)}, ...]"""
     items = []
     for idx, s in enumerate(steps):
         c = RISK_COLORS.get(s["level"], {"main": "#616161", "bg": "#eee", "border": "#ccc"})
         arrow = "" if idx == 0 else f'<div style="color:{SUBTLE};font-size:2rem;font-weight:300;padding:0 14px;">→</div>'
+        icon_html = (
+            f'<div style="display:flex;justify-content:center;margin-bottom:6px;">{s["icon"]}</div>'
+            if s.get("icon") else ""
+        )
         items.append(
             f"""{arrow}
             <div style="text-align:center;flex:1;min-width:110px;">
                 <div style="color:{SUBTLE};font-size:0.88rem;font-weight:700;margin-bottom:10px;">{s['label']}</div>
+                {icon_html}
                 <div style="background:{c['bg']};border:2px solid {c['border']};color:{c['main']};
                             border-radius:14px;padding:1rem 0.6rem;font-weight:900;font-size:1.3rem;">
                     {s['level']}

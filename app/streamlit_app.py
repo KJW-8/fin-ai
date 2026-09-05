@@ -38,7 +38,7 @@ for p in (SRC_DIR, APP_DIR):
         sys.path.insert(0, str(p))
 
 from config import INTEREST_RATE_FIXED, PAYMENT_RATIO_GAP_WARN_CUTOFF, RISK_LEVEL_THRESHOLD_DEFAULT  # noqa: E402
-from coaching import FEATURE_EXPLANATIONS, FEATURE_LABELS, generate_coaching_message  # noqa: E402
+from coaching import FEATURE_LABELS, generate_coaching_message, generate_risk_factor_explanation  # noqa: E402
 from model import build_feature_row, build_feature_table, deterministic_recursion_step, recursive_forecast, simulate_extra_payment  # noqa: E402
 from risk import classify_risk_indicator  # noqa: E402
 from shap_utils import build_explainers, explain_row, load_models  # noqa: E402
@@ -59,13 +59,19 @@ import recovery as rec  # noqa: E402
 # 같은 값을 보도록). 로컬 쉘 환경변수가 있으면 그쪽이 우선한다.
 _hydrate_env_from_st_secrets()
 
-PAGES = [
+# 고객이 실제로 써야 하는 화면(예측·분석·코칭·시뮬레이션)과, 서비스가 얼마나 믿을 만한지
+# 검증하려는 사람(심사위원·데이터 전문가)을 위한 화면을 분리한다. 후자는 기능은 그대로
+# 두되 메인 네비게이션에서 우선순위를 낮춰, 사이드바에서 시각적으로 구분되는 그룹으로 뺀다.
+CUSTOMER_PAGES = [
     ("home", "내 금융 상태"),
     ("risk", "위험 분석"),
     ("coaching", "AI 상환 코칭"),
     ("simulator", "상환 시뮬레이션"),
-    ("trust", "모델 신뢰도"),
 ]
+EXPERT_PAGES = [
+    ("trust", "모델 검증"),
+]
+PAGES = CUSTOMER_PAGES + EXPERT_PAGES
 PAGE_LABELS = dict(PAGES)
 
 # 화면에 노출되는 각 지표가 "무엇을 기준으로 계산됐는지" 설명하는 문구.
@@ -350,14 +356,17 @@ def fmt_won(x: float) -> str:
 
 
 def top_signals(bundle: dict, k: int = 3) -> list[dict]:
-    """핵심 위험 신호: S/r 두 모델의 SHAP 기여도를 합쳐 |기여도| 상위 k개."""
-    combined = []
-    for feat, val in bundle["shap_S"].items():
-        combined.append({"feature": feat, "value": val, "model": "S"})
-    for feat, val in bundle["shap_r"].items():
-        combined.append({"feature": feat, "value": val, "model": "r"})
-    combined.sort(key=lambda d: abs(d["value"]), reverse=True)
-    return combined[:k]
+    """핵심 위험 신호: S/r 두 모델의 SHAP 기여도를 합쳐 |기여도| 상위 k개.
+    같은 피처가 두 모델 모두에서 나타나면(흔함) 절댓값이 더 큰 쪽만 남긴다 — 그래프에
+    같은 요인명이 두 번 뜨거나, 코칭 LLM에 같은 요인이 중복으로 전달되는 걸 막는다."""
+    best: dict[str, dict] = {}
+    for model_key, model_label in (("shap_S", "S"), ("shap_r", "r")):
+        for feat, val in bundle[model_key].items():
+            cur = best.get(feat)
+            if cur is None or abs(val) > abs(cur["value"]):
+                best[feat] = {"feature": feat, "value": val, "model": model_label}
+    ranked = sorted(best.values(), key=lambda d: abs(d["value"]), reverse=True)
+    return ranked[:k]
 
 
 def risk_level_action_text(level: str) -> str:
@@ -377,8 +386,7 @@ def render_hazard_block(bundle: dict, context: str = "home") -> None:
     hzb = bundle.get("hazard")
     mascot.section_with_accent(
         "언제 위험 단계로 넘어갈 가능성이 있나요?",
-        "XGBoost 전망이 '값이 어떻게 움직일까'라면, 이 이산시간 위험모형은 '언제 경고 단계로 넘어갈 "
-        "가능성이 있을까'를 별도로 계산합니다.",
+        "지금 패턴이 이어진다면 앞으로 몇 개월 안에 경고 단계로 넘어갈 수 있는지 따로 계산해봤어요.",
         accent_key="report",
     )
     if hzb is None:
@@ -430,8 +438,8 @@ def render_hazard_block(bundle: dict, context: str = "home") -> None:
                 unsafe_allow_html=True,
             )
             st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
-    st.caption("이 수치는 별도의 이산시간 위험모형(로지스틱 회귀)이 계산한 추정치이며, 확정된 결과가 아닙니다. "
-               "모형 검증 지표는 '모델 신뢰도' 화면에서 확인할 수 있어요.")
+    st.caption("이 수치는 지금 패턴이 그대로 유지된다는 가정 아래의 예상치이며, 확정된 결과가 아니에요. "
+               "검증 지표는 사이드바의 '모델 검증' 화면에서 확인할 수 있어요.")
 
 
 # ---------------------------------------------------------------------------
@@ -596,10 +604,10 @@ def render_home(bundle: dict, outlook: list[dict]):
             level=bundle["current_risk"],
             headline="현재 결제 패턴을 기준으로 판정된 위험 단계입니다.",
             sub_metrics_html=sub_metrics,
+            stepper_html=theme.risk_stepper_html(bundle["current_risk"]),
         ),
         unsafe_allow_html=True,
     )
-    st.markdown(theme.card_open() + theme.risk_stepper_html(bundle["current_risk"]) + theme.card_close(), unsafe_allow_html=True)
 
     # 조기경보
     escalation = find_first_escalation(outlook, target_level="경고")
@@ -624,31 +632,9 @@ def render_home(bundle: dict, outlook: list[dict]):
             unsafe_allow_html=True,
         )
 
-    mascot.section_with_accent("향후 위험 궤적", "지금 패턴이 유지될 경우 예상되는 변화예요.", accent_key="focus")
-    with st.container(border=True):
-        st.markdown(
-            f'<div style="color:{theme.SUBTLE};font-size:0.9rem;margin-bottom:0.4rem;">'
-            "이 선은 지금 패턴이 그대로 유지될 경우 예상되는 리볼빙 의존도 변화예요. "
-            "배경 색이 바뀌는 지점이 위험 단계가 전환되는 시점입니다.</div>",
-            unsafe_allow_html=True,
-        )
-        st.plotly_chart(charts.risk_trajectory_chart(outlook), width="stretch", config={"displayModeBar": False})
-
-    # ④ 언제 위험 단계로 넘어갈 가능성이 있는가 — 이산시간 위험모형(XGBoost와 역할 분리)
-    render_hazard_block(bundle, context="home")
-
-    mascot.section_with_accent("핵심 위험 신호", "다음 달 전망에 가장 크게 영향을 준 요인입니다.", accent_key="analyze")
-    signal_lines = []
-    for sig in top_signals(bundle, k=3):
-        label = FEATURE_LABELS.get(sig["feature"], sig["feature"])
-        target = "사용액" if sig["model"] == "S" else "약정결제비율"
-        direction = "높이는" if sig["value"] > 0 else "낮추는"
-        signal_lines.append(f"<li style='margin-bottom:6px;'><b>{label}</b> — 다음 달 {target} 전망을 {direction} 방향으로 작용</li>")
-    st.markdown(
-        theme.card_open() + f"<ul style='margin:0;padding-left:1.2rem;'>{''.join(signal_lines)}</ul>" + theme.card_close(),
-        unsafe_allow_html=True,
-    )
-
+    # "향후 위험 궤적"·"언제 위험 단계로 넘어갈 가능성이 있나요?"·"내 상태에 영향을 준 요인"은
+    # 전부 "왜 이런 상태가 되었는지"를 설명하는 내용이라 위험 분석 탭과 겹친다. 두 탭에
+    # 똑같이 두는 대신 위험 분석 탭 하나로 모으고, 여기서는 버튼으로 안내만 한다.
     st.markdown(
         theme.alert_card("💡", "추천 행동", risk_level_action_text(bundle["predicted_risk"]), tone=bundle["predicted_risk"]),
         unsafe_allow_html=True,
@@ -656,7 +642,7 @@ def render_home(bundle: dict, outlook: list[dict]):
 
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("위험 원인 확인하기", type="primary", width="stretch"):
+        if st.button("왜 이런 상태가 되었는지 알아보기", type="primary", width="stretch"):
             go_to("risk")
     with c2:
         if st.button("AI 코칭 받기", width="stretch"):
@@ -666,7 +652,43 @@ def render_home(bundle: dict, outlook: list[dict]):
 # ---------------------------------------------------------------------------
 # 페이지 2: 위험 분석
 # ---------------------------------------------------------------------------
-def render_risk(bundle: dict):
+@st.cache_data(show_spinner=False)
+def _cached_risk_factor_explanation(key: tuple, use_mock: bool) -> str | None:
+    """위험 분석 화면 전용 SHAP 해석 문단. bundle 이 바뀌지 않는 한(고객·상태·요인이 동일하면)
+    재호출하지 않는다 — 화면 안의 다른 위젯(expander 등)을 조작할 때마다 매번 API를
+    다시 부르지 않기 위해서다(hazard 번들 캐싱과 동일한 방식)."""
+    risk_indicator, share, delta, gap, streak, factors = key
+    context = {
+        "risk_indicator": risk_indicator,
+        "current_carryover_share": share,
+        "current_delta_3m": delta,
+        "current_gap": gap,
+        "current_streak": streak,
+        "top_factors": [{"feature": f, "label": FEATURE_LABELS.get(f, f), "contribution": v} for f, v in factors],
+    }
+    try:
+        return generate_risk_factor_explanation(context, use_mock=use_mock)["explanation"]
+    except Exception:
+        return None
+
+
+def render_risk_factor_explanation(bundle: dict, top: list[dict]) -> str | None:
+    def _r(x):
+        return round(float(x), 6) if x is not None and pd.notna(x) else None
+
+    key = (
+        bundle["current_risk"],
+        _r(bundle["current_carryover_share"]),
+        _r(bundle["current_delta_3m"]),
+        _r(bundle["current_gap"]),
+        int(bundle["current_streak"]),
+        tuple((s["feature"], _r(s["value"])) for s in top),
+    )
+    use_mock = os.environ.get("USE_MOCK_COACHING", "true").strip().lower() != "false"
+    return _cached_risk_factor_explanation(key, use_mock)
+
+
+def render_risk(bundle: dict, outlook: list[dict], anchor_row: pd.DataFrame, feature_cols: list[str]):
     def _risk_tile(label: str, state: str) -> str:
         c = theme.RISK_COLORS.get(state, theme.RISK_COLORS["관찰"])["main"]
         img = mascot.state_img(state, size_px=74)
@@ -688,72 +710,61 @@ def render_risk(bundle: dict):
         unsafe_allow_html=True,
     )
 
-    st.markdown(theme.section_header("위험도 구성", "네 가지 신호를 종합해 위험 단계를 판정합니다.").strip(), unsafe_allow_html=True)
-    rising = "상승 중" if pd.notna(bundle["current_delta_3m"]) and bundle["current_delta_3m"] > 0 else "안정적"
-    st.markdown(
-        theme.metric_row(
-            [
-                theme.metric_tile("리볼빙 의존도", fmt_pct(bundle["current_carryover_share"]),
-                                  desc=METRIC_DEFINITIONS["리볼빙 의존도"]),
-                theme.metric_tile("상승 추세", rising, note=fmt_pct(bundle["current_delta_3m"], signed=True),
-                                  desc=METRIC_DEFINITIONS["상승 추세"]),
-                theme.metric_tile("결제여유", fmt_pct(bundle["current_gap"]), note="약정결제비율 − 최소결제비율",
-                                  desc=METRIC_DEFINITIONS["결제여유"]),
-                theme.metric_tile("최소결제 반복", f"{bundle['current_streak']}개월 연속" if bundle["current_streak"] > 0 else "없음",
-                                  desc=METRIC_DEFINITIONS["최소결제 반복"]),
-            ]
-        ),
-        unsafe_allow_html=True,
-    )
+    # "내 금융 상태" 탭에 있던 향후 위험 궤적 / 위험 전환 전망도 결국 "왜 이런 상태가
+    # 되었는지"를 설명하는 내용이라 이 탭으로 모았다(중복 방지).
+    mascot.section_with_accent("향후 위험 궤적", "지금 패턴이 유지될 경우 예상되는 변화예요.", accent_key="focus")
+    with st.container(border=True):
+        st.markdown(
+            f'<div style="color:{theme.SUBTLE};font-size:0.9rem;margin-bottom:0.4rem;">'
+            "이 선은 지금 패턴이 그대로 유지될 경우 예상되는 리볼빙 의존도 변화예요. "
+            "배경 색이 바뀌는 지점이 위험 단계가 전환되는 시점입니다.</div>",
+            unsafe_allow_html=True,
+        )
+        st.plotly_chart(charts.risk_trajectory_chart(outlook), width="stretch", config={"displayModeBar": False})
 
+    render_hazard_block(bundle, context="risk")
+
+    # 두 예측 모델(S/r)의 기여도를 하나로 합쳐 막대 하나짜리 그래프로 보여준다.
+    # "다음 달 사용액 모델" / "다음 달 상환비율 모델"로 나눠서 보여주면 고객 입장에서는
+    # "모델이 두 개"라는 사실 자체가 불필요한 정보라, 합쳐서 "요인 하나당 막대 하나"로
+    # 단순화했다 — 계산(top_signals)은 그대로, 보여주는 방식만 바꿨다.
     mascot.section_with_accent(
-        "예측에 영향을 준 주요 요인",
-        "막대가 길수록 영향이 큽니다. 주황색은 위험을 높이는 방향, 청록색은 낮추는 방향이에요.",
+        "왜 이런 상태가 되었을까요?",
+        "최근 결제 패턴 중에서 지금 상태에 가장 크게 영향을 준 항목들이에요. 막대가 길수록 영향이 크고, "
+        "주황색은 위험을 높이는 방향, 청록색은 낮추는 방향이에요.",
         accent_key="report",
     )
+    top = top_signals(bundle, k=5)
+    merged_shap = {s["feature"]: s["value"] for s in top}
+    with st.container(border=True):
+        st.plotly_chart(charts.shap_bar_chart(merged_shap, FEATURE_LABELS, k=5), width="stretch",
+                         config={"displayModeBar": False}, key="risk_merged_shap_chart")
 
-    def _factor_explain_block(shap_dict: dict) -> str:
-        """상위 3개 요인의 '왜 영향을 주는지' 설명을, 느슨한 텍스트가 아니라 한 덩어리
-        블록(라벨 + 설명 목록)으로 묶어서 보여준다."""
-        top_items = sorted(shap_dict.items(), key=lambda kv: abs(kv[1]), reverse=True)[:3]
-        rows = []
-        for i, (feat, _v) in enumerate(top_items):
-            label = FEATURE_LABELS.get(feat, feat)
-            expl = FEATURE_EXPLANATIONS.get(feat, "")
-            sep = "" if i == 0 else f"border-top:1px dashed {theme.LINE};"
-            rows.append(
-                f'<div style="padding:0.55rem 0;{sep}">'
-                f'<div style="font-weight:800;color:{theme.INK};font-size:0.9rem;">{label}</div>'
-                f'<div style="color:{theme.SUBTLE};font-size:0.83rem;line-height:1.5;margin-top:2px;">{expl}</div>'
-                f'</div>'
-            )
-        # 좌우 설명 블록 높이를 고정한다 -> 차트 높이는 동일하므로 두 박스도 같은 높이가
-        # 된다. (SHAP 차트는 이 블록 밖에 있으므로 차트 렌더링에는 영향 없음)
-        return theme.compact_html(
-            f'<div style="background:{theme.PAGE_BG};border:1px solid {theme.LINE};border-radius:10px;'
-            f'padding:0.15rem 0.9rem 0.55rem;margin-top:0.7rem;height:340px;overflow:auto;box-sizing:border-box;">'
-            f'<div style="font-size:0.72rem;font-weight:800;color:{theme.SUBTLE};letter-spacing:0.03em;'
-            f'padding:0.6rem 0 0.15rem;">이 요인들이 왜 영향을 주나요?</div>'
-            + "".join(rows) + "</div>"
-        )
-
-    def shap_section(shap_dict: dict, title: str, k: int = 5):
-        with st.container(border=True):
+        explanation = render_risk_factor_explanation(bundle, top)
+        if explanation:
+            # 박스 안 여백이 위/옆은 컨테이너 기본 패딩(1rem)으로 맞춰지는데, 아래쪽은
+            # 그 패딩만으로는 문단 마지막 줄과 박스 하단이 다른 변보다 좁아 보여서
+            # padding-bottom을 추가로 줘 상하좌우 여백이 비슷하게 느껴지도록 맞췄다.
             st.markdown(
-                f'<div style="font-weight:800;color:{theme.INK};font-size:1rem;margin-bottom:0.2rem;">{title}</div>',
+                f'<div style="color:{theme.INK};font-size:0.93rem;line-height:1.6;margin-top:0.6rem;'
+                f'padding-top:0.6rem;padding-bottom:0.6rem;border-top:1px dashed {theme.LINE};">{explanation}</div>',
                 unsafe_allow_html=True,
             )
-            # SHAP 막대그래프 — 위험 요인별 기여도. 반드시 유지한다.
-            st.plotly_chart(charts.shap_bar_chart(shap_dict, FEATURE_LABELS, k=k), width="stretch", config={"displayModeBar": False})
-            st.markdown(_factor_explain_block(shap_dict), unsafe_allow_html=True)
-
-    c1, c2 = st.columns(2)
-    with c1:
-        shap_section(bundle["shap_S"], "다음 달 사용액 예측")
-    with c2:
-        shap_section(bundle["shap_r"], "다음 달 상환 비율 예측")
 
     with st.expander("전문 분석 보기 (원본 피처명 · SHAP 수치)"):
+        def shap_section(shap_dict: dict, title: str, k: int = 5):
+            st.markdown(f'<div style="font-weight:800;color:{theme.INK};font-size:0.95rem;">{title}</div>', unsafe_allow_html=True)
+            st.plotly_chart(charts.shap_bar_chart(shap_dict, FEATURE_LABELS, k=k), width="stretch",
+                             config={"displayModeBar": False}, key=f"risk_expert_chart_{title}")
+
+        cc1, cc2 = st.columns(2)
+        with cc1:
+            shap_section(bundle["shap_S"], "다음 달 사용액 예측 (모델 f1)")
+        with cc2:
+            shap_section(bundle["shap_r"], "다음 달 상환 비율 예측 (모델 f2)")
+
+        st.markdown("**원본 변수명 · SHAP 수치**")
+
         def shap_bar(shap_dict: dict, title: str):
             items = sorted(shap_dict.items(), key=lambda kv: abs(kv[1]), reverse=True)[:10]
             labels = [f for f, _ in items]
@@ -761,14 +772,20 @@ def render_risk(bundle: dict):
             colors = ["#c62828" if v > 0 else "#1565c0" for v in values]
             fig = go.Figure(go.Bar(x=values, y=labels, orientation="h", marker_color=colors))
             fig.update_layout(title=title, height=380, yaxis=dict(autorange="reversed"), margin=dict(l=10, r=10, t=40, b=10))
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig, width="stretch", key=f"risk_expert_raw_{title}")
 
-        cc1, cc2 = st.columns(2)
-        with cc1:
+        ccc1, ccc2 = st.columns(2)
+        with ccc1:
             shap_bar(bundle["shap_S"], f"S(t+1) 예측 기여도 (base={bundle['base_S']:,.0f}원)")
-        with cc2:
+        with ccc2:
             shap_bar(bundle["shap_r"], f"r(t+1) 예측 기여도 (base={bundle['base_r']*100:.1f}%)")
-        st.caption("빨간 막대 = 값을 높이는 방향, 파란 막대 = 낮추는 방향으로 기여")
+        st.caption("빨간 막대 = 값을 높이는 방향, 파란 막대 = 낮추는 방향으로 기여 (SHAP feature importance)")
+
+        st.markdown("**모델 입력값 (원본 피처명)**")
+        st.write(f"예측값 — 다음 달 사용액(S): {bundle['pred_S']:,.0f}원 / 다음 달 상환 비율(r): {bundle['pred_r']*100:.1f}%")
+        row = anchor_row.iloc[0]
+        input_row = {c: (None if pd.isna(row.get(c)) else row.get(c)) for c in feature_cols if c in row.index}
+        st.dataframe(pd.DataFrame([input_row]).T.rename(columns={0: "값"}), width="stretch")
 
     if st.button("AI 코칭 받기", type="primary"):
         go_to("coaching")
@@ -784,7 +801,7 @@ def render_coaching(bundle: dict, anchor_row, monthly_transaction, derived_featu
             f'padding:1.1rem 1.4rem;margin-bottom:1rem;display:flex;align-items:center;gap:0.8rem;">'
             f'{mascot.accent("smile", size_px=56)}'
             f'<div><div style="font-weight:900;font-size:1.58rem;color:{theme.BRAND};letter-spacing:-0.01em;">AI 상환 코칭</div>'
-            f'<div style="color:{theme.SUBTLE};margin-top:4px;">현재까지의 결제 패턴과 앞으로의 예측 결과를 모두 종합해서 알려드릴게요.</div></div>'
+            f'<div style="color:{theme.SUBTLE};margin-top:4px;">지금의 금융 습관을 바탕으로, 앞으로의 변화를 함께 살펴볼게요.</div></div>'
             f'</div>'
         ),
         unsafe_allow_html=True,
@@ -800,7 +817,12 @@ def render_coaching(bundle: dict, anchor_row, monthly_transaction, derived_featu
         "</div>"
     )
     steps = [
-        {"label": "현재" if s["month_offset"] == 0 else f"{s['month_offset']}개월 후", "level": s["level"], "value": fmt_pct(s["carryover_share"])}
+        {
+            "label": "현재" if s["month_offset"] == 0 else f"{s['month_offset']}개월 후",
+            "level": s["level"],
+            "value": fmt_pct(s["carryover_share"]),
+            "icon": mascot.state_img(s["level"], size_px=40),
+        }
         for s in outlook
     ]
     st.markdown(
@@ -811,7 +833,7 @@ def render_coaching(bundle: dict, anchor_row, monthly_transaction, derived_featu
     # --- 최소 개입액을 먼저 계산해서, 사용자가 시뮬레이터를 직접 안 돌려봤어도
     #     "얼마를 더 갚으면 되는지"를 코칭 컨텍스트의 simulation 근거로 자동 포함시킨다.
     #     (사용자가 직접 시뮬레이터를 돌려본 결과가 있으면 그걸 우선한다) ---
-    with st.spinner("현재 상태·SHAP 요인·3개월 전망·추가 상환 시나리오를 종합하는 중..."):
+    with st.spinner("현재 상태·주요 요인·3개월 전망·추가 상환 시나리오를 종합하는 중..."):
         min_intervention = find_minimum_intervention(
             model_S, model_r, feature_cols, anchor_row, monthly_transaction, derived_features, horizon=3, target_max_level="경고"
         )
@@ -899,11 +921,11 @@ def render_coaching(bundle: dict, anchor_row, monthly_transaction, derived_featu
             st.session_state["prefill_extra_payment"] = int(min_intervention["extra_payment"])
         go_to("simulator")
 
-    with st.expander("근거 보기 — 왜 이런 조언을 했나요?"):
+    with st.expander("왜 이런 조언을 했나요?"):
         for seg in segments:
             st.markdown(theme.evidence_line(seg["source"], seg["text"]), unsafe_allow_html=True)
 
-    st.caption("모든 조언 문장은 JSON Schema 검증과 근거(raw_data/shap/simulation) 일치성 검증을 통과한 것만 표시됩니다.")
+    st.caption("모든 조언 문장은 실제 데이터와 분석 결과를 근거로, 검증을 통과한 것만 보여드려요.")
 
 
 # ---------------------------------------------------------------------------
@@ -912,7 +934,8 @@ def render_coaching(bundle: dict, anchor_row, monthly_transaction, derived_featu
 def render_simulator(bundle: dict, anchor_row, monthly_transaction, derived_features, model_S, model_r, feature_cols):
     st.markdown(
         theme.card_open()
-        + '<div style="font-weight:800;font-size:1.15rem;">내가 조금 더 갚으면 어떻게 달라질까요?</div>'
+        + '<div style="font-weight:900;font-size:1.4rem;color:{0};letter-spacing:-0.01em;">조금 더 갚으면 어떻게 달라질까요?</div>'.format(theme.BRAND)
+        + f'<div style="color:{theme.SUBTLE};margin-top:4px;">원하는 추가 상환액을 입력하면 오뚝이의 상태가 어떻게 달라지는지 바로 확인할 수 있어요.</div>'
         + theme.card_close(),
         unsafe_allow_html=True,
     )
@@ -932,7 +955,7 @@ def render_simulator(bundle: dict, anchor_row, monthly_transaction, derived_feat
             f'<div style="color:{theme.INK};font-size:0.93rem;line-height:1.55;">'
             f'약정결제비율을 지금보다 <b>약 5%p</b> 높여보는 시나리오예요 (추가 상환 약 <b>{mission_extra:,.0f}원</b>에 해당). '
             f'아래 버튼을 누르면 이 값이 시뮬레이션에 적용돼요 — 미션 달성이 아니라, 행동을 바꿨을 때 '
-            f'<b>모델 출력이 실제로 어떻게 변하는지</b> 확인하는 게 목적이에요.</div></div></div>'
+            f'<b>오뚝이 상태가 실제로 어떻게 달라지는지</b> 확인하는 게 목적이에요.</div></div></div>'
         ),
         unsafe_allow_html=True,
     )
@@ -1156,8 +1179,10 @@ def render_trust():
         <div style="display:flex;align-items:center;gap:0.8rem;background:{theme.SURFACE};
                     border:1px solid {theme.LINE};border-radius:16px;padding:1.2rem 1.4rem;margin-bottom:1rem;">
             {_acc}
-            <div><div style="font-weight:900;font-size:1.65rem;color:{theme.BRAND};letter-spacing:-0.01em;">모델 신뢰도</div>
-                 <div style="color:{theme.SUBTLE};margin-top:4px;">이 서비스의 예측 결과가 어떻게 검증되었는지 공개합니다.</div></div>
+            <div><div style="font-weight:900;font-size:1.65rem;color:{theme.BRAND};letter-spacing:-0.01em;">모델 검증</div>
+                 <div style="color:{theme.INK};margin-top:6px;line-height:1.6;">오뚝이는 과거 데이터를 무작위로 섞어 예측하지
+                 않아요. 실제 서비스에서 미래를 예측하는 상황과 똑같이, 과거 데이터로 학습하고 그 이후 기간으로
+                 성능을 검증했습니다. 아래는 그 검증 수치예요.</div></div>
         </div>"""),
         unsafe_allow_html=True,
     )
@@ -1190,7 +1215,7 @@ def render_trust():
     horizons = ["horizon_1", "horizon_2", "horizon_3"]
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=[1, 2, 3], y=[rec[h]["carryover_share"]["mae"] * 100 for h in horizons], mode="lines+markers", name="리볼빙 의존도 오차(%p)"))
-    fig.update_layout(height=320, xaxis_title="예측 개월수", yaxis_title="MAE (%p)", margin=dict(l=10, r=10, t=20, b=10))
+    fig.update_layout(height=320, xaxis_title="예측 개월수", yaxis_title="예측 오차 (%p)", margin=dict(l=10, r=10, t=20, b=10))
     st.plotly_chart(fig, width="stretch")
     st.caption(model_metrics["notes"]["recursive_multistep_horizon_1"])
 
@@ -1353,7 +1378,7 @@ page = st.session_state.get("nav_page", "home")
 if page == "home":
     render_home(bundle, outlook)
 elif page == "risk":
-    render_risk(bundle)
+    render_risk(bundle, outlook, anchor_row, feature_cols)
 elif page == "coaching":
     render_coaching(bundle, anchor_row, monthly_transaction, derived_features, model_S, model_r, feature_cols, outlook)
 elif page == "simulator":

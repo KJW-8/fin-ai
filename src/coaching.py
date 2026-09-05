@@ -72,6 +72,10 @@ FEATURE_LABELS = {
     "actual_principal_paid": "실제 상환원금",
     "month_index": "가입 후 경과 개월수",
     "revolving_active": "리볼빙 이용 여부",
+    "minimum_principal_required": "이번 달 최소 상환 필요액",
+    "payment_status_정상": "이번 달 결제 상태(정상 결제)",
+    "payment_status_최소결제": "이번 달 결제 상태(최소결제)",
+    "payment_status_연체": "이번 달 결제 상태(연체)",
 }
 
 # 각 피처가 "왜" 위험도 예측에 영향을 주는지 한 줄 설명. SHAP 막대그래프 옆에 표시해
@@ -98,6 +102,10 @@ FEATURE_EXPLANATIONS = {
     "actual_principal_paid": "실제로 갚은 원금이 적을수록 이월 금액이 늘어나요.",
     "month_index": "리볼빙을 이용해온 기간이 길수록 지금 패턴이 굳어질 가능성이 있어요.",
     "revolving_active": "리볼빙이 계속 활성화돼 있으면 이 패턴이 이어질 가능성이 커요.",
+    "minimum_principal_required": "이번 달 최소한 갚아야 하는 원금이 클수록, 상환 부담이 커질 수 있어요.",
+    "payment_status_정상": "이번 달 제때 정상적으로 결제했는지를 나타내요.",
+    "payment_status_최소결제": "이번 달 최소 금액만 결제했는지를 나타내요. 최소결제가 반복되면 이월 금액이 계속 쌓일 수 있어요.",
+    "payment_status_연체": "이번 달 결제일을 넘겨 연체했는지를 나타내요. 연체가 있으면 위험이 커질 수 있어요.",
 }
 
 
@@ -497,6 +505,184 @@ def generate_coaching_message(context: dict, use_mock: bool | None = None) -> di
 
     available_sources = available_sources_for_context(context)
     validate_coaching_message(message, available_sources)
+    return message
+
+
+# ---------------------------------------------------------------------------
+# 위험 분석 화면 전용 — "왜 이런 상태가 되었는가" SHAP 요인 해석 (별도 기능)
+#
+# generate_coaching_message()와 역할이 겹치지 않도록 범위를 좁게 잡는다:
+#   - 이 함수는 "지금 수치가 왜 이 요인들로 이어졌는지"만 설명한다(현재 상태의 원인 설명).
+#   - 미래 예측(향후 3개월 전망)·위험 전환 시점·상환 시뮬레이션·행동 제안은 절대
+#     언급하지 않는다 — 그건 AI 상환 코칭 화면(generate_coaching_message)의 역할이다.
+# mock/real 전환과 JSON Schema 검증은 위 함수와 동일한 패턴을 따른다.
+# ---------------------------------------------------------------------------
+RISK_FACTOR_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "explanation": {"type": "string", "minLength": 1},
+    },
+    "required": ["explanation"],
+    "additionalProperties": False,
+}
+
+RISK_FACTOR_SYSTEM_PROMPT = """당신은 '오뚝이'라는 리볼빙(일부결제금액이월약정) 조기경보 서비스의 설명
+도우미입니다. 역할은 하나뿐입니다 — 이미 계산되어 있는 "이 고객의 현재 위험 판정에 가장 크게
+영향을 준 요인들"을, 그 고객의 실제 수치를 근거로 왜 그런지 쉽게 풀어 설명하는 것입니다. 당신은
+어떤 숫자도 직접 계산하지 않으며, 이미 계산된 값을 해석만 합니다.
+
+절대 하지 말아야 할 것 (서비스의 다른 화면이 담당하는 영역이라 여기서 다루면 안 됩니다):
+- 다음 달·향후 몇 개월 등 미래 예측이나 궤적 언급 금지
+- 위험 단계가 언제 전환될지(전환 확률·전환 시점) 언급 금지
+- 상환 시뮬레이션·추가 상환액 등 행동 제안이나 "~하세요" 식 권유 금지
+이 화면은 순수하게 "지금 왜 이런 결과가 나왔는지"만 이해시키는 역할입니다. 위 내용은 서비스의
+다른 화면(AI 상환 코칭)에서 이미 다루므로 여기서 반복하면 안 됩니다.
+
+받는 입력:
+- 현재_상태: 현재 위험 단계와 그 판정에 쓰인 실제 수치(리볼빙 의존도, 최근 3개월 변화, 결제여유,
+  연속 최소결제 개월수)
+- 주요_요인: 이 고객의 현재 판정에 가장 크게 영향을 준 요인들(요인명, 영향 방향) — 순서대로 영향력이 큼
+
+출력 형식: 아래 JSON 객체 하나만 반환하세요. 다른 설명, 마크다운 코드펜스 없이 순수 JSON만.
+  {"explanation": "4~6문장의 한 문단"}
+
+문체 지침:
+- 전문용어(SHAP, 피처, 변수명, 모델 등) 노출 금지. "요인"·"영향" 같은 쉬운 말만 쓰세요.
+- 주요_요인에 있는 요인을 하나도 빠짐없이 전부 언급하세요(순서상 앞의 것일수록 영향이 크다는
+  점을 자연스럽게 드러내되, 뒤쪽 요인이라고 생략하지 마세요). 영향 방향이 같은 요인끼리는
+  묶어서 한 문장으로 자연스럽게 이어 써도 됩니다("~와 ~도 함께 위험을 낮추는 방향으로
+  작용하고 있어요" 처럼).
+- 각 요인이 왜 이 고객에게 영향을 줬는지, 현재_상태의 실제 수치와 연결지어 설명하세요. 숫자를
+  그냥 재진술하지 말고 "그래서 어떤 의미인지"까지 풀어 쓰세요.
+- 옆에서 설명해 주는 사람처럼 친근한 대화체로 쓰세요(예: "~하고 계세요", "~때문이에요").
+- "신용점수"·"신용등급" 표현은 쓰지 마세요.
+"""
+
+
+def mock_generate_risk_factor_explanation(context: dict) -> dict:
+    """API 없이, 실제 context의 요인·수치를 반영한 설명 문단을 만든다. 그래프에 나온 요인을
+    하나도 빠짐없이(방향별로 묶어서) 언급해 "그래프에는 5개 나오는데 설명은 1개만 짧게
+    나온다"는 인상을 주지 않도록 한다."""
+    factors = context.get("top_factors") or []
+    risk = context.get("risk_indicator", "관찰")
+    share = context.get("current_carryover_share")
+    delta = context.get("current_delta_3m")
+    gap = context.get("current_gap")
+
+    if not factors:
+        return {"explanation": "지금 표시된 위험 단계를 뒷받침할 만큼 뚜렷하게 두드러지는 요인은 아직 없어요."}
+
+    def _label(f):
+        return f.get("label", f.get("feature"))
+
+    def _join_kr(labels: list[str]) -> str:
+        if len(labels) == 1:
+            return labels[0]
+        return ", ".join(labels[:-1]) + f", {labels[-1]}"
+
+    def _eun_neun(word: str) -> str:
+        """word 마지막 글자에 받침이 있으면 '은', 없으면 '는' (조사 자동 선택)."""
+        ch = word[-1] if word else ""
+        if "가" <= ch <= "힣":
+            return "은" if (ord(ch) - 0xAC00) % 28 != 0 else "는"
+        return "는"
+
+    lead = factors[0]
+    lead_label = _label(lead)
+    lead_dir = "높이는" if (lead.get("contribution") or 0) > 0 else "낮추는"
+    parts = []
+    if share is not None:
+        parts.append(
+            f"지금 리볼빙 의존도가 {share * 100:.1f}%인데, 그중에서도 '{lead_label}'이(가) 위험을 "
+            f"{lead_dir} 방향으로 가장 크게 작용하고 있어요."
+        )
+    else:
+        parts.append(f"'{lead_label}'이(가) 위험을 {lead_dir} 방향으로 가장 크게 작용하고 있어요.")
+
+    # 나머지 요인은 방향(높이는/낮추는)별로 묶어서, 그래프에 나온 요인을 전부 언급한다.
+    rest = factors[1:]
+    rest_up = [_label(f) for f in rest if (f.get("contribution") or 0) > 0]
+    rest_down = [_label(f) for f in rest if (f.get("contribution") or 0) <= 0]
+    if rest_up:
+        parts.append(f"{_join_kr(rest_up)}도 위험을 높이는 방향으로 함께 작용하고 있어요.")
+    if rest_down:
+        down_text = _join_kr(rest_down)
+        parts.append(f"반대로 {down_text}{_eun_neun(rest_down[-1])} 위험을 낮추는 방향으로 작용해서, 그나마 상황을 조금 눌러주고 있는 요인이에요.")
+
+    # 실제 수치 한 가지를 더 근거로 덧붙인다(있을 때만).
+    if delta is not None and abs(delta) >= 0.005:
+        trend = "빠르게 올라가고" if delta > 0 else "조금씩 내려가고"
+        parts.append(f"최근 3개월간 의존도가 {trend} 있는 흐름도 지금 판정에 함께 반영됐어요.")
+    elif gap is not None and gap <= 0.05:
+        parts.append("결제여유가 거의 없어 최소한만 겨우 갚고 있는 상태인 점도 영향을 줬어요.")
+
+    parts.append(f"이 요인들이 종합적으로 합쳐져 지금의 '{risk}' 단계 판정으로 이어진 거예요.")
+    return {"explanation": " ".join(parts)}
+
+
+def real_generate_risk_factor_explanation(context: dict) -> dict:
+    """Claude Haiku 4.5로 "왜 이런 상태가 되었는지" 설명 문단을 생성한다. ANTHROPIC_API_KEY 필요."""
+    import anthropic
+
+    _hydrate_env_from_st_secrets()
+    client = anthropic.Anthropic()
+
+    def _pct(x, signed=False):
+        if x is None:
+            return None
+        try:
+            x = float(x)
+        except (TypeError, ValueError):
+            return None
+        if x != x:  # NaN
+            return None
+        return f"{x*100:+.1f}%p" if signed else f"{x*100:.1f}%"
+
+    user_payload = {
+        "현재_상태": {
+            "위험_단계": context.get("risk_indicator"),
+            "리볼빙_의존도": _pct(context.get("current_carryover_share")),
+            "최근_3개월간_변화": _pct(context.get("current_delta_3m"), signed=True),
+            "결제여유": _pct(context.get("current_gap")),
+            "연속_최소결제_개월수": context.get("current_streak"),
+        },
+        "주요_요인": [
+            {
+                "요인": f.get("label", f.get("feature")),
+                "영향_방향": "위험을 높이는" if (f.get("contribution") or 0) > 0 else "위험을 낮추는",
+            }
+            for f in (context.get("top_factors") or [])
+        ],
+    }
+
+    response = client.messages.create(
+        model=MODEL_NAME,
+        max_tokens=768,
+        system=RISK_FACTOR_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)}],
+    )
+    text = "".join(block.text for block in response.content if block.type == "text")
+    try:
+        return _extract_json(text)
+    except json.JSONDecodeError as e:
+        raise CoachingValidationError(f"Claude 응답을 JSON으로 파싱하지 못했습니다: {e}") from e
+
+
+def generate_risk_factor_explanation(context: dict, use_mock: bool | None = None) -> dict:
+    """위험 분석 화면 전용 진입점. generate_coaching_message 와는 별도로 mock/real 전환한다."""
+    if use_mock is None:
+        _hydrate_env_from_st_secrets()
+        use_mock = os.environ.get("USE_MOCK_COACHING", "true").strip().lower() != "false"
+
+    message = (
+        mock_generate_risk_factor_explanation(context)
+        if use_mock
+        else real_generate_risk_factor_explanation(context)
+    )
+    try:
+        jsonschema.validate(instance=message, schema=RISK_FACTOR_SCHEMA)
+    except jsonschema.ValidationError as e:
+        raise CoachingValidationError(f"JSON Schema 검증 실패: {e.message}") from e
     return message
 
 
