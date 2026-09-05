@@ -77,6 +77,10 @@ SIDEBAR_SELECTED_TEXT = "#ffffff"
 # 비슷하다. 폰트 로딩 실패 시 시스템 고딕으로 폴백한다. 단일 웨이트(400)이므로 font-weight는
 # 지정하지 않는다.
 LOGO_FONT = '"Black Han Sans", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif'
+# 사이드바 "오뚝이" 워드마크 전용 서체. Black Han Sans보다 덜 두껍고 둥글둥글한 인상을
+# 위해 Google Fonts의 'Jua'(주아체)를 쓴다 — 단일 웨이트의 둥근 고딕으로, 귀여운
+# 마스코트 톤에 더 잘 어울린다(본문 헤더의 ottugi-wordmark는 기존 서체 유지).
+SIDEBAR_LOGO_FONT = '"Jua", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif'
 
 
 def compact_html(html: str) -> str:
@@ -92,7 +96,7 @@ def inject_global_css() -> None:
     st.markdown(
         f"""
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=Black+Han+Sans&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Jua&display=swap');
         html, body, [class*="css"] {{
             font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
                 "Malgun Gothic", "Segoe UI", sans-serif;
@@ -101,6 +105,11 @@ def inject_global_css() -> None:
         .ottugi-wordmark {{
             font-family: {LOGO_FONT};
             letter-spacing: 0.03em;
+        }}
+        /* 사이드바 워드마크 — 덜 두껍고 둥글둥글한 인상의 서체 */
+        .ottugi-wordmark-sidebar {{
+            font-family: {SIDEBAR_LOGO_FONT};
+            letter-spacing: 0.02em;
         }}
         .stApp {{
             background: {PAGE_BG};

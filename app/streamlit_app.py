@@ -453,7 +453,7 @@ def render_sidebar(account_master: pd.DataFrame, feature_table: pd.DataFrame, de
             theme.compact_html(
                 f'<div style="display:flex;align-items:center;gap:0.6rem;margin:0.3rem 0 1rem 0;">'
                 f'<div style="flex:1;min-width:0;">'
-                f'<div class="ottugi-wordmark" style="font-size:2.4rem;color:{theme.SIDEBAR_TEXT};line-height:1.05;">오뚝이</div>'
+                f'<div class="ottugi-wordmark-sidebar" style="font-size:2.4rem;color:{theme.SIDEBAR_TEXT};line-height:1.05;">오뚝이</div>'
                 f'<div style="font-size:0.82rem;color:{theme.SIDEBAR_TEXT_MUTED};font-weight:500;line-height:1.45;margin-top:4px;">'
                 f'당신의 리밸런싱도,<br>쓰러져도 스스로 중심을 되찾는 오뚝이처럼</div></div>'
                 f'<div style="flex-shrink:0;">{_g}</div></div>'
@@ -986,7 +986,7 @@ def render_simulator(bundle: dict, anchor_row, monthly_transaction, derived_feat
             f'<div style="background:{theme.SURFACE};border:1px dashed {_acc_ap}80;border-left:4px solid {_acc_ap};'
             f'border-radius:14px;padding:1.1rem 1.3rem;margin:0.6rem 0;display:flex;gap:0.8rem;align-items:flex-start;">'
             f'{mascot.accent("applaud", size_px=58)}'
-            f'<div><div style="font-weight:900;color:{theme.BRAND};font-size:1.53rem;margin-bottom:0.4rem;letter-spacing:-0.01em;">이번 달 오뚝이 미션</div>'
+            f'<div><div style="font-weight:900;color:{theme.BRAND};font-size:1.53rem;margin-bottom:0.4rem;letter-spacing:-0.01em;">뚜기가 주는 미션!</div>'
             f'<div style="color:{theme.INK};font-size:0.93rem;line-height:1.55;">'
             f'약정결제비율을 지금보다 <b>약 5%p</b> 높여보는 시나리오예요 (추가 상환 약 <b>{mission_extra:,.0f}원</b>에 해당). '
             f'아래 버튼을 누르면 이 값이 시뮬레이션에 적용돼요 — 미션 달성이 아니라, 행동을 바꿨을 때 '
@@ -1209,7 +1209,7 @@ def render_simulator(bundle: dict, anchor_row, monthly_transaction, derived_feat
         )
     st.markdown(
         theme.compact_html(
-            '<div style="display:flex;gap:0.8rem;align-items:stretch;flex-wrap:wrap;">'
+            '<div style="display:flex;gap:0.8rem;align-items:stretch;flex-wrap:wrap;margin-bottom:2rem;">'
             + "".join(card_htmls)
             + "</div>"
         ),
