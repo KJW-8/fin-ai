@@ -199,6 +199,13 @@ def inject_global_css() -> None:
         section[data-testid="stSidebar"] label[data-testid="stRadioOption"] > div > div > div:first-child {{
             display: none;
         }}
+        /* Streamlit 버전에 따라 DOM이 다르다(구버전: label > div > div > [circle, markdown],
+           신버전: label > div > [circle 컨테이너, markdown]). 배포 서버(Streamlit Cloud)는
+           최신 버전이 설치되어 위 선택자만으로는 빨간 원이 남았으므로, "마크다운 영역 바로
+           앞 형제 div = 원형 인디케이터"라는 구조 독립적인 규칙을 추가로 둔다. */
+        section[data-testid="stSidebar"] label[data-testid="stRadioOption"] div:has(+ [data-testid="stMarkdownContainer"]) {{
+            display: none !important;
+        }}
         section[data-testid="stSidebar"] label[data-testid="stRadioOption"] [data-testid="stMarkdownContainer"] {{
             padding: 0.8rem 0.9rem;
             width: 100%;
