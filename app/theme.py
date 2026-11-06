@@ -199,6 +199,34 @@ def inject_global_css() -> None:
         section[data-testid="stSidebar"] label[data-testid="stRadioOption"] > div > div > div:first-child {{
             display: none;
         }}
+        /* 신버전 Streamlit: stRadioGroup(align-items:flex-start) > 옵션별 래퍼 div > label 구조라
+           래퍼가 글자 폭(약 110px)으로 줄어들어 메뉴 선/박스가 짧아진다. 래퍼를 꽉 채우고,
+           래퍼 안에서 label이 항상 :first-child가 되어 윗선이 매 항목마다 생기는 것과
+           "서비스 검증" 라벨(5번째)이 어긋나는 문제를 함께 바로잡는다. 구버전(label이
+           radiogroup의 직계 자식)에서는 이 규칙들이 매칭되지 않아 영향이 없다. */
+        section[data-testid="stSidebar"] [data-testid="stRadioGroup"] {{
+            align-items: stretch !important;
+        }}
+        section[data-testid="stSidebar"] [data-testid="stRadioGroup"] > div {{
+            width: 100% !important;
+            align-items: stretch !important;
+        }}
+        section[data-testid="stSidebar"] [data-testid="stRadioGroup"] > div:not(:first-child) > label[data-testid="stRadioOption"]:first-child {{
+            border-top: none;
+        }}
+        section[data-testid="stSidebar"] [data-testid="stRadioGroup"] > div:nth-of-type(5) > label[data-testid="stRadioOption"] {{
+            margin-top: 14px;
+            position: relative;
+        }}
+        section[data-testid="stSidebar"] [data-testid="stRadioGroup"] > div:nth-of-type(5) > label[data-testid="stRadioOption"]::before {{
+            content: "서비스 검증";
+            display: block;
+            font-size: 0.72rem;
+            font-weight: 800;
+            letter-spacing: 0.05em;
+            color: {SIDEBAR_TEXT_MUTED};
+            padding: 4px 0.9rem 6px;
+        }}
         /* Streamlit 버전에 따라 DOM이 다르다(구버전: label > div > div > [circle, markdown],
            신버전: label > div > [circle 컨테이너, markdown]). 배포 서버(Streamlit Cloud)는
            최신 버전이 설치되어 위 선택자만으로는 빨간 원이 남았으므로, "마크다운 영역 바로
